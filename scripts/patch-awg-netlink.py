@@ -163,13 +163,13 @@ replacement = '''int __init wg_genetlink_init(void)
 \t       genl_family.ops, genl_ops, genl_family.maxattr, genl_family.policy,
 \t       genl_family.module, genl_family.netnsok, genl_family.parallel_ops);
 \tpr_err("AWGDBG: genl op0 cmd=%u doit=%px dumpit=%px; op1 cmd=%u doit=%px dumpit=%px\\n",
-\t       genl_ops[0].cmd, genl_ops[0].doit, genl_ops[0].dumpit,
-\t       genl_ops[1].cmd, genl_ops[1].doit, genl_ops[1].dumpit);
+\t       genl_ops[0].cmd, genl_ops[0].doit, genl_ops[1].cmd, genl_ops[1].doit,
+\t       genl_ops[0].dumpit, genl_ops[1].dumpit);
 \tpr_err("AWGDBG: genl mcgrp0 name=%s\\n", genl_family.n_mcgrps ? genl_family.mcgrps[0].name : "<none>");
 \treturn genl_register_family(&genl_family);
 }'''
 
-s, n = re.sub(
+s, n = re.subn(
     r'int __init wg_genetlink_init\(void\)\n\{\n\s*return genl_register_family\(&genl_family\);\n\}',
     replacement,
     s,
