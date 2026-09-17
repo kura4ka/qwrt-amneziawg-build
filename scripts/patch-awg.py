@@ -60,9 +60,84 @@ p.write_text(s)
 
 p = Path('awg/src/netlink.c')
 s = p.read_text()
-s = s.replace(
-    'int __init wg_genetlink_init(void)\n{\n\treturn genl_register_family(&genl_family);\n}',
-    'int __init wg_genetlink_init(void)\n{\n\tpr_err("AWGDBG: MCGRPS_OFF_BUILD\\n");\n\tpr_err("AWGDBG: genl sizeof_family=%zu sizeof_ops=%zu name=%s n_ops=%u n_mcgrps=%u\\n",\n\t       sizeof(genl_family), sizeof(genl_ops), genl_family.name,\n\t       genl_family.n_ops, genl_family.n_mcgrps);\n\tpr_err("AWGDBG: genl op0 cmd=%u doit=%px dumpit=%px; op1 cmd=%u doit=%px dumpit=%px\\n",\n\t       genl_ops[0].cmd, genl_ops[0].doit, genl_ops[0].dumpit,\n\t       genl_ops[1].cmd, genl_ops[1].doit, genl_ops[1].dumpit);\n\tpr_err("AWGDBG: genl mcgrp0 name=%s\\n", genl_family.n_mcgrps ? genl_family.mcgrps[0].name : "<none>");\n\treturn genl_register_family(&genl_family);\n}', 1)
+needle = '#include <net/genetlink.h>\n'
+probe = '''
+static int awg_probe_doit(struct sk_buff *skb, struct genl_info *info)
+{
+\treturn 0;
+}
+
+static int awg_genl_probe_empty(void)
+{
+\tstatic struct genl_family probe = {
+\t\t.name = "awgprobe0",
+\t\t.version = 1,
+\t\t.module = THIS_MODULE,
+\t};
+\tint ret = genl_register_family(&probe);
+\tpr_err("AWGDBG: probe_empty register=%d ops=%px n_ops=%u mcgrps=%px n_mcgrps=%u\\n",
+\t       ret, probe.ops, probe.n_ops, probe.mcgrps, probe.n_mcgrps);
+\tif (!ret)
+\t\tgenl_unregister_family(&probe);
+\treturn ret;
+}
+
+static int awg_genl_probe_oneop(void)
+{
+\tstatic const struct genl_ops probe_ops[] = {
+\t\t{ .cmd = 1, .doit = awg_probe_doit },
+\t};
+\tstatic struct genl_family probe = {
+\t\t.name = "awgprobe1",
+\t\t.version = 1,
+\t\t.ops = probe_ops,
+\t\t.n_ops = ARRAY_SIZE(probe_ops),
+\t\t.module = THIS_MODULE,
+\t};
+\tint ret = genl_register_family(&probe);
+\tpr_err("AWGDBG: probe_oneop register=%d family.ops=%px probe_ops=%px n_ops=%u cmd=%u doit=%px\\n",
+\t       ret, probe.ops, probe_ops, probe.n_ops, probe_ops[0].cmd, probe_ops[0].doit);
+\tif (!ret)
+\t\tgenl_unregister_family(&probe);
+\treturn ret;
+}
+'''
+if probe not in s:
+    s = s.replace(needle, needle + probe, 1)
+
+old = '''int __init wg_genetlink_init(void)
+{
+\tpr_err("AWGDBG: MCGRPS_OFF_BUILD\\n");
+\tpr_err("AWGDBG: genl sizeof_family=%zu sizeof_ops=%zu name=%s n_ops=%u n_mcgrps=%u\\n",
+\t       sizeof(genl_family), sizeof(genl_ops), genl_family.name,
+\t       genl_family.n_ops, genl_family.n_mcgrps);
+\tpr_err("AWGDBG: genl op0 cmd=%u doit=%px dumpit=%px; op1 cmd=%u doit=%px dumpit=%px\\n",
+\t       genl_ops[0].cmd, genl_ops[0].doit, genl_ops[0].dumpit,
+\t       genl_ops[1].cmd, genl_ops[1].doit, genl_ops[1].dumpit);
+\tpr_err("AWGDBG: genl mcgrp0 name=%s\\n", genl_family.n_mcgrps ? genl_family.mcgrps[0].name : "<none>");
+\treturn genl_register_family(&genl_family);
+}'''
+new = '''int __init wg_genetlink_init(void)
+{
+\tpr_err("AWGDBG: PROBE_BEGIN\\n");
+\tawg_genl_probe_empty();
+\tawg_genl_probe_oneop();
+\tpr_err("AWGDBG: MCGRPS_OFF_BUILD\\n");
+\tpr_err("AWGDBG: genl sizeof_family=%zu sizeof_ops=%zu name=%s n_ops=%u n_mcgrps=%u\\n",
+\t       sizeof(genl_family), sizeof(genl_ops), genl_family.name,
+\t       genl_family.n_ops, genl_family.n_mcgrps);
+\tpr_err("AWGDBG: family.ops=%px genl_ops=%px maxattr=%u policy=%px module=%px netnsok=%u parallel_ops=%u\\n",
+\t       genl_family.ops, genl_ops, genl_family.maxattr, genl_family.policy,
+\t       genl_family.module, genl_family.netnsok, genl_family.parallel_ops);
+\tpr_err("AWGDBG: genl op0 cmd=%u doit=%px dumpit=%px; op1 cmd=%u doit=%px dumpit=%px\\n",
+\t       genl_ops[0].cmd, genl_ops[0].doit, genl_ops[0].dumpit,
+\t       genl_ops[1].cmd, genl_ops[1].doit, genl_ops[1].dumpit);
+\tpr_err("AWGDBG: genl mcgrp0 name=%s\\n", genl_family.n_mcgrps ? genl_family.mcgrps[0].name : "<none>");
+\treturn genl_register_family(&genl_family);
+}'''
+if old not in s:
+    raise SystemExit('expected netlink init block not found')
+s = s.replace(old, new, 1)
 s = s.replace('.mcgrps = wg_genl_mcgrps,', '.mcgrps = NULL,', 1)
 s = s.replace('.n_mcgrps = ARRAY_SIZE(wg_genl_mcgrps)', '.n_mcgrps = 0', 1)
 p.write_text(s)
