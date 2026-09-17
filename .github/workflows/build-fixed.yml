@@ -23,7 +23,25 @@ jobs:
           grep -q '^# CONFIG_LOCALVERSION_AUTO is not set$' .config
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= prepare modules_prepare
           test "$(cat include/config/kernel.release)" = 5.4.213
+          echo '=== module ABI config ==='
+          grep -E '^CONFIG_(MODULES|MODULES_USE_ELF_RELA|MODULES_TREE_LOOKUP|MODULE_UNLOAD|MODVERSIONS|MODULE_STRIPPED|MODULE_SIG|KALLSYMS|GENERIC_BUG|ARM64_MODULE_PLTS|SYSFS|SMP|TRACEPOINTS|TREE_SRCU|BPF_EVENTS|JUMP_LABEL|TRACING|EVENT_TRACING|FTRACE_MCOUNT_RECORD|CONSTRUCTORS|FUNCTION_ERROR_INJECTION|LIVEPATCH)=' .config || true
           echo "KDIR=$PWD" >> "$GITHUB_ENV"
+      - name: Probe struct module ABI
+        run: |
+          set -eux
+          rm -rf "$GITHUB_WORKSPACE/abi_probe"
+          mkdir -p "$GITHUB_WORKSPACE/abi_probe"
+          cat > "$GITHUB_WORKSPACE/abi_probe/abi_probe.c" <<'EOF'
+          #include <linux/module.h>
+          char qws_module_size_probe[sizeof(struct module)];
+          EOF
+          cat > "$GITHUB_WORKSPACE/abi_probe/Makefile" <<'EOF'
+          obj-m += abi_probe.o
+          EOF
+          make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M="$GITHUB_WORKSPACE/abi_probe" modules
+          size="$(readelf -Ws "$GITHUB_WORKSPACE/abi_probe/abi_probe.o" | awk '$8 == "qws_module_size_probe" {print $3; exit}')"
+          echo "QSDK struct module size = ${size} bytes"
+          test "$size" = 768
       - name: Kernel dependency symbol modules
         run: |
           set -eux
