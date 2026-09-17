@@ -37,8 +37,9 @@ jobs:
           EOF
           make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M="$GITHUB_WORKSPACE/depmods" KCFLAGS="-Wno-error=dangling-pointer -Wno-dangling-pointer" modules
           test -s "$GITHUB_WORKSPACE/depmods/Module.symvers"
-          grep -Eq '[[:space:]]udp_tunnel[[:space:]]' "$GITHUB_WORKSPACE/depmods/Module.symvers"
-          grep -Eq '[[:space:]]ip6_udp_tunnel[[:space:]]' "$GITHUB_WORKSPACE/depmods/Module.symvers"
+          grep -Eq '[[:space:]]udp_tunnel_sock_create([[:space:]]|$)' "$GITHUB_WORKSPACE/depmods/Module.symvers"
+          grep -Eq '[[:space:]]ip6_udp_tunnel([[:space:]]|$)|[[:space:]]udp_tunnel6_xmit_skb([[:space:]]|$)' "$GITHUB_WORKSPACE/depmods/Module.symvers"
+          sed -n '1,120p' "$GITHUB_WORKSPACE/depmods/Module.symvers"
       - name: AWG
         run: |
           set -eux
@@ -64,6 +65,7 @@ jobs:
           test "$(modinfo -F vermagic ./amneziawg.ko)" = '5.4.213 SMP preempt mod_unload aarch64'
           deps="$(modinfo -F depends ./amneziawg.ko)"
           echo "AWG depends=$deps"
+          test -n "$deps"
           printf '%s\n' "$deps" | tr ',' '\n' | grep -qx 'udp_tunnel'
           printf '%s\n' "$deps" | tr ',' '\n' | grep -qx 'ip6_udp_tunnel'
           mkdir -p "$GITHUB_WORKSPACE/out"
