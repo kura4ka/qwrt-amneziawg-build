@@ -12,6 +12,9 @@ s = s.replace('(CHACHA_BLOCK_SIZE / sizeof(u32))', '(CHACHA20_BLOCK_SIZE / sizeo
 s = s.replace(
     '#include <crypto/blake2s.h>\n#define blake2s_ctx blake2s_state\n#define blake2s(key, keylen, in, inlen, out, outlen) \\\n\tblake2s(out, in, key, outlen, inlen, keylen)',
     '#include <zinc/blake2s.h>\n#define blake2s_ctx blake2s_state', 1)
+s = s.replace(
+    '#define COMPAT_INIT_CRYPTO',
+    '#define COMPAT_CANNOT_USE_NETLINK_MCGRPS\n#define COMPAT_INIT_CRYPTO', 1)
 p.write_text(s)
 
 p = Path('awg/src/noise.c')
