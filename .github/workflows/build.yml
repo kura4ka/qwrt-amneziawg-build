@@ -52,27 +52,38 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          # QSDK 12.5 is based on 5.4.213 but carries backported crypto APIs.
-          # Do not enable AWG's old crypto-init compatibility implementation.
           p = Path("awg/src/compat/compat.h")
           s = p.read_text()
+
+          # QSDK 12.5 is based on 5.4.213 but carries backported crypto APIs.
+          # Disable AWG's old crypto-init compatibility implementation.
           old = "&& LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0) && !defined(ISUBUNTU2004)"
           new = "&& LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0) && !defined(ISUBUNTU2004) && !defined(ISQSDK)"
           if old not in s:
               raise SystemExit("COMPAT_INIT_CRYPTO condition not found")
           s = s.replace(old, new, 1)
 
-          # QSDK's crypto/chacha.h uses the same include guard as the upstream
-          # compatibility header. Select the AWG compatibility API explicitly
-          # for QSDK so chacha_init()/chacha20_crypt() are visible to compat.h.
+          # QSDK's crypto/chacha.h uses the same include guard as the original
+          # AWG compatibility header. For QSDK 5.4, include our wrapper with a
+          # private guard so chacha_init()/chacha20_crypt() are available.
           old = '#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0)\n#include <crypto/chacha.h>'
           new = '''#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0)\n#if defined(ISQSDK) && LINUX_VERSION_CODE < KERNEL_VERSION(5, 5, 0)\n#include "crypto/chacha/include/crypto/chacha.h"\n#else\n#include <crypto/chacha.h>\n#endif'''
           if old not in s:
               raise SystemExit("ChaCha include block not found")
           s = s.replace(old, new, 1)
+
+          # The QSDK kernel already supplies CHACHA_BLOCK_SIZE. The wrapper
+          # supplies only the missing API, so use Zinc's block-size constant for
+          # the compatibility struct instead of redefining the kernel macro.
+          old = '#ifndef CHACHA_STATE_WORDS\n#define CHACHA_STATE_WORDS\\t(CHACHA_BLOCK_SIZE / sizeof(u32))\n#endif'
+          new = '#ifndef CHACHA_STATE_WORDS\n#define CHACHA_STATE_WORDS\\t(CHACHA20_BLOCK_SIZE / sizeof(u32))\n#endif'
+          if old not in s:
+              raise SystemExit("CHACHA_STATE_WORDS block not found")
+          s = s.replace(old, new, 1)
           p.write_text(s)
 
-          # The compatibility header must not share the kernel's guard.
+          # The compatibility header has a private guard to avoid colliding with
+          # QSDK's include/crypto/chacha.h guard.
           p = Path("awg/src/compat/crypto/chacha/include/crypto/chacha.h")
           s = p.read_text()
           s = s.replace("#ifndef _CRYPTO_CHACHA_H", "#ifndef __AWG_COMPAT_CRYPTO_CHACHA_H", 1)
@@ -80,17 +91,28 @@ jobs:
           s = s.replace("#endif /* _CRYPTO_CHACHA_H */", "#endif /* __AWG_COMPAT_CRYPTO_CHACHA_H */", 1)
           p.write_text(s)
 
-          # The original Kbuild -includes compat.h first, so injecting the
-          # ChaCha header via another -include is too late. The explicit include
-          # above is intentionally used instead.
+          # Remove the previous -include experiment if it is present.
           p = Path("awg/src/compat/Kbuild.include")
           s = p.read_text()
-          injected = "ifeq ($(shell [ $(VERSION) -lt 5 -o \\( $(VERSION) -eq 5 -a $(PATCHLEVEL) -lt 5 \\) ] && echo y),y)\\nccflags-y += -include $(kbuild-dir)/compat/crypto/chacha/include/crypto/chacha.h\\nendif\\n\\n"
-          s = s.replace(injected, "")
+          start = "ifeq ($(shell [ $(VERSION) -lt 5 -o \\( $(VERSION) -eq 5 -a $(PATCHLEVEL) -lt 5 \\) ] && echo y),y)"
+          if start in s:
+              lines = s.splitlines(True)
+              out = []
+              skip = 0
+              for line in lines:
+                  if skip:
+                      skip -= 1
+                      continue
+                  if line.rstrip("\\n") == start:
+                      skip = 2
+                      continue
+                  out.append(line)
+              s = ''.join(out)
           p.write_text(s)
           PY
 
-          grep -n -A8 -B2 'LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0)' awg/src/compat/compat.h
+          grep -n -A10 -B2 'LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0)' awg/src/compat/compat.h
+          grep -n 'CHACHA_STATE_WORDS' awg/src/compat/compat.h
           grep -n 'COMPAT_INIT_CRYPTO' awg/src/compat/compat.h || true
           grep -n 'compat/crypto/chacha/include' awg/src/compat/Kbuild.include || true
 
