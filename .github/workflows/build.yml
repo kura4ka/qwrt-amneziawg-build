@@ -1,0 +1,73 @@
+name: Build AmneziaWG 5.4.213
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev dwarves device-tree-compiler gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu cpio rsync wget xz-utils git
+
+      - name: Fetch QSDK 5.4.213 kernel source
+        run: |
+          set -eux
+          mkdir -p work
+          cd work
+          INDEX=$(wget -qO- https://mirror2.openwrt.org/sources/)
+          KERNEL=$(printf '%s' "$INDEX" | grep -oE 'linux-5\.4\.213-qsdk-[A-Za-z0-9._-]+\.tar\.(xz|gz)' | head -n1)
+          test -n "$KERNEL"
+          echo "Using $KERNEL"
+          wget -q "https://mirror2.openwrt.org/sources/$KERNEL" -O kernel.tar
+          case "$KERNEL" in
+            *.tar.xz) tar -xJf kernel.tar ;;
+            *.tar.gz) tar -xzf kernel.tar ;;
+          esac
+          KDIR=$(find . -maxdepth 1 -type d -name 'linux-5.4.213*' | head -n1)
+          test -n "$KDIR"
+          echo "KDIR=$PWD/$KDIR" >> "$GITHUB_ENV"
+
+      - name: Prepare kernel tree
+        run: |
+          set -eux
+          cd "$KDIR"
+          cp "$GITHUB_WORKSPACE/config/qwrt-5.4.213.config" .config
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- prepare modules_prepare
+          echo "CONFIG_MODULES=$(grep '^CONFIG_MODULES=' .config || true)"
+          echo "CONFIG_MODVERSIONS=$(grep '^CONFIG_MODVERSIONS=' .config || true)"
+
+      - name: Fetch AmneziaWG
+        run: |
+          set -eux
+          git clone --depth 1 --branch v3.1.20260906 https://github.com/amnezia-vpn/amneziawg-linux-kernel-module.git awg
+
+      - name: Build AmneziaWG kernel module
+        run: |
+          set -eux
+          cd awg/src
+          make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- M="$PWD" CONFIG_AMNEZIAWG=m WIREGUARD_VERSION=3.1.20260906 modules
+          test -f amneziawg.ko
+          modinfo ./amneziawg.ko || true
+          strings ./amneziawg.ko | grep -E 'vermagic=|AmneziaWG|amneziawg' | head -20
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp amneziawg.ko "$GITHUB_WORKSPACE/out/amneziawg.ko"
+          cp Module.symvers "$GITHUB_WORKSPACE/out/Module.symvers" || true
+
+      - name: Verify module
+        run: |
+          set -eux
+          file out/amneziawg.ko
+          strings out/amneziawg.ko | grep 'vermagic=5.4.213 SMP preempt mod_unload aarch64'
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: amneziawg-5.4.213
+          path: out/
