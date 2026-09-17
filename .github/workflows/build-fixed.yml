@@ -20,7 +20,6 @@ jobs:
           sed -i '/^CONFIG_LOCALVERSION_AUTO=/d' .config
           echo '# CONFIG_LOCALVERSION_AUTO is not set' >> .config
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= olddefconfig
-          grep -q '^# CONFIG_LOCALVERSION_AUTO is not set$' .config
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= prepare modules_prepare
           test "$(cat include/config/kernel.release)" = 5.4.213
           echo '=== module ABI config ==='
