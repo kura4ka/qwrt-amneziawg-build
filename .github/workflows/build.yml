@@ -1,7 +1,7 @@
 name: Build AmneziaWG 5.4.213
 
 on:
-  push:
+  pull_request:
     branches: [main]
   workflow_dispatch:
 
