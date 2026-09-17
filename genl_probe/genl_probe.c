@@ -3,11 +3,45 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/kprobes.h>
-#include <linux/genetlink.h>
+#include <linux/types.h>
+
+/* QSDK 12.5 genl_family layout through n_ops/n_mcgrps. */
+struct qws_genl_family_view {
+	int id;
+	unsigned int hdrsize;
+	char name[16];
+	unsigned int version;
+	unsigned int maxattr;
+	bool netnsok;
+	bool parallel_ops;
+	const void *policy;
+	void *pre_doit;
+	void *post_doit;
+	void *attrbuf;
+	const void *ops;
+	const void *mcgrps;
+	unsigned int n_ops;
+	unsigned int n_mcgrps;
+	unsigned int mcgrp_offset;
+	void *module;
+};
+
+struct qws_genl_ops_view {
+	void *doit;
+	void *start;
+	void *dumpit;
+	void *done;
+	u8 cmd;
+	u8 internal_flags;
+	u8 flags;
+	u8 validate;
+};
 
 static int genl_probe_pre(struct kprobe *p, struct pt_regs *regs)
 {
-	struct genl_family *f = (struct genl_family *)regs->regs[0];
+	struct qws_genl_family_view *f =
+		(struct qws_genl_family_view *)regs->regs[0];
+	const struct qws_genl_ops_view *ops;
 	unsigned int i, n;
 
 	if (!f)
@@ -21,8 +55,9 @@ static int genl_probe_pre(struct kprobe *p, struct pt_regs *regs)
 		f->name, f->n_ops, f->n_mcgrps, f->maxattr,
 		f->netnsok, f->parallel_ops, f, f->ops, f->module);
 
+	ops = (const struct qws_genl_ops_view *)f->ops;
 	for (i = 0; i < n; ++i) {
-		const struct genl_ops *op = &f->ops[i];
+		const struct qws_genl_ops_view *op = &ops[i];
 		pr_info("GENLPROBE op%u cmd=%u doit=%px dumpit=%px start=%px done=%px flags=0x%x validate=0x%x\n",
 			i, op->cmd, op->doit, op->dumpit, op->start, op->done,
 			op->flags, op->validate);
