@@ -17,11 +17,12 @@ jobs:
           cd work
           test "$(sed -n 's/^SUBLEVEL = //p' Makefile)" = 213
           cp "$GITHUB_WORKSPACE/config/qwrt-5.4.213.config" .config
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= olddefconfig
           sed -i '/^CONFIG_LOCALVERSION_AUTO=/d' .config
           echo '# CONFIG_LOCALVERSION_AUTO is not set' >> .config
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= olddefconfig
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= prepare modules_prepare
           test "$(cat include/config/kernel.release)" = 5.4.213
+          test "$(make -s ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= kernelrelease)" = 5.4.213
           echo '=== module ABI config ==='
           grep -E '^CONFIG_(MODULES|MODULES_USE_ELF_RELA|MODULES_TREE_LOOKUP|MODULE_UNLOAD|MODVERSIONS|MODULE_STRIPPED|MODULE_SIG|KALLSYMS|GENERIC_BUG|ARM64_MODULE_PLTS|SYSFS|SMP|TRACEPOINTS|TREE_SRCU|BPF_EVENTS|JUMP_LABEL|TRACING|EVENT_TRACING|FTRACE_MCOUNT_RECORD|CONSTRUCTORS|FUNCTION_ERROR_INJECTION|LIVEPATCH)=' .config || true
           echo "KDIR=$PWD" >> "$GITHUB_ENV"
