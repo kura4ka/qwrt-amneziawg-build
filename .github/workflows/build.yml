@@ -34,9 +34,6 @@ jobs:
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- prepare modules_prepare
           echo "Kernel version: $(make -s ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- kernelversion)"
-          echo "CONFIG_PREEMPT=$(grep '^CONFIG_PREEMPT=' .config || true)"
-          echo "CONFIG_MODULES=$(grep '^CONFIG_MODULES=' .config || true)"
-          echo "CONFIG_MODVERSIONS=$(grep '^CONFIG_MODVERSIONS=' .config || true)"
 
       - name: Fetch AmneziaWG
         run: |
@@ -48,51 +45,60 @@ jobs:
           set -eux
           mkdir -p awg/src/compat/crypto/chacha/include/crypto
           cp "$GITHUB_WORKSPACE/patches/chacha.h" awg/src/compat/crypto/chacha/include/crypto/chacha.h
-
           python3 - <<'PY'
           from pathlib import Path
-
           p = Path("awg/src/compat/compat.h")
           s = p.read_text()
 
-          # QSDK 12.5 is based on 5.4.213 but carries backported crypto APIs.
           needle = " && !defined(ISUBUNTU2004)\n#define COMPAT_INIT_CRYPTO"
           replacement = " && !defined(ISUBUNTU2004) && !defined(ISQSDK)\n#define COMPAT_INIT_CRYPTO"
           if needle not in s:
               raise SystemExit("COMPAT_INIT_CRYPTO block not found")
           s = s.replace(needle, replacement, 1)
 
-          # QSDK's ChaCha header lacks the API required by AWG.
           old = '#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0)\n#include <crypto/chacha.h>'
           new = '''#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0)\n#if defined(ISQSDK) && LINUX_VERSION_CODE < KERNEL_VERSION(5, 5, 0)\n#include "crypto/chacha/include/crypto/chacha.h"\n#else\n#include <crypto/chacha.h>\n#endif'''
           if old not in s:
               raise SystemExit("ChaCha include block not found")
           s = s.replace(old, new, 1)
+          s = s.replace("(CHACHA_BLOCK_SIZE / sizeof(u32))", "(CHACHA20_BLOCK_SIZE / sizeof(u32))", 1)
 
-          old = "(CHACHA_BLOCK_SIZE / sizeof(u32))"
-          new = "(CHACHA20_BLOCK_SIZE / sizeof(u32))"
-          if old not in s:
-              raise SystemExit("CHACHA_BLOCK_SIZE expression not found")
-          s = s.replace(old, new, 1)
-
-          # Use bundled Zinc BLAKE2s on QSDK; its kernel header collides with Zinc.
+          # compat.h is force-included into Zinc objects, so never redefine the
+          # Zinc blake2s() function with the old WireGuard argument-order macro.
           old = '#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 19, 0)\n#include <crypto/blake2s.h>\n#define blake2s_ctx blake2s_state\n#define blake2s(key, keylen, in, inlen, out, outlen) \\\n\tblake2s(out, in, key, outlen, inlen, keylen)\n#endif'
-          new = '''#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 19, 0)\n#include <zinc/blake2s.h>\n#define blake2s_ctx blake2s_state\n#define blake2s(key, keylen, in, inlen, out, outlen) \\\n\tblake2s(out, in, key, outlen, inlen, keylen)\n#endif'''
+          new = '''#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 19, 0)\n#include <zinc/blake2s.h>\n#define blake2s_ctx blake2s_state\n#endif'''
           if old not in s:
               raise SystemExit("blake2s compatibility block not found")
           s = s.replace(old, new, 1)
           p.write_text(s)
 
-          # These files explicitly include the kernel BLAKE2s header.
-          for name in ("awg/src/messages.h", "awg/src/cookie.c"):
-              p = Path(name)
-              s = p.read_text()
-              old = '#include <crypto/blake2s.h>'
-              new = '#if defined(ISQSDK)\n#include <zinc/blake2s.h>\n#else\n#include <crypto/blake2s.h>\n#endif'
-              if old not in s:
-                  raise SystemExit(f"blake2s include not found in {name}")
-              s = s.replace(old, new, 1)
-              p.write_text(s)
+          # Convert the three module-level old-order calls to Zinc's native order.
+          p = Path("awg/src/noise.c")
+          s = p.read_text()
+          old = '''blake2s(NULL, 0, handshake_name, sizeof(handshake_name),\n\t\thandshake_init_chaining_key, NOISE_HASH_LEN);'''
+          new = '''blake2s(handshake_init_chaining_key, handshake_name, NULL,\n\t\tNOISE_HASH_LEN, sizeof(handshake_name), 0);'''
+          if old not in s:
+              raise SystemExit("noise.c blake2s call not found")
+          p.write_text(s.replace(old, new, 1))
+
+          p = Path("awg/src/cookie.c")
+          s = p.read_text()
+          s = s.replace('blake2s(key, NOISE_SYMMETRIC_KEY_LEN, message, len, mac1, COOKIE_LEN);',
+                        'blake2s(mac1, message, key, COOKIE_LEN, len, NOISE_SYMMETRIC_KEY_LEN);', 1)
+          s = s.replace('blake2s(cookie, COOKIE_LEN, message, len, mac2, COOKIE_LEN);',
+                        'blake2s(mac2, message, cookie, COOKIE_LEN, len, COOKIE_LEN);', 1)
+          old = '#include <crypto/blake2s.h>'
+          if old not in s:
+              raise SystemExit("cookie.c blake2s include not found")
+          s = s.replace(old, '#include <zinc/blake2s.h>', 1)
+          p.write_text(s)
+
+          p = Path("awg/src/messages.h")
+          s = p.read_text()
+          old = '#include <crypto/blake2s.h>'
+          if old not in s:
+              raise SystemExit("messages.h blake2s include not found")
+          p.write_text(s.replace(old, '#include <zinc/blake2s.h>', 1))
 
           p = Path("awg/src/compat/crypto/chacha/include/crypto/chacha.h")
           s = p.read_text()
@@ -101,11 +107,7 @@ jobs:
           s = s.replace("#endif /* _CRYPTO_CHACHA_H */", "#endif /* __AWG_COMPAT_CRYPTO_CHACHA_H */", 1)
           p.write_text(s)
           PY
-
-          sed -n '890,905p' awg/src/compat/compat.h
           sed -n '1398,1440p' awg/src/compat/compat.h
-          sed -n '1,20p' awg/src/messages.h
-          sed -n '8,22p' awg/src/cookie.c
 
       - name: Build AmneziaWG kernel module
         run: |
@@ -113,17 +115,10 @@ jobs:
           cd awg/src
           make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- M="$PWD" CONFIG_AMNEZIAWG=m WIREGUARD_VERSION=3.1.20260906 EXTRA_CFLAGS=-DISQSDK V=1 modules
           test -f amneziawg.ko
-          modinfo ./amneziawg.ko || true
-          strings ./amneziawg.ko | grep -E 'vermagic=|AmneziaWG|amneziawg' | head -20
+          strings ./amneziawg.ko | grep 'vermagic=5.4.213 SMP preempt mod_unload aarch64'
           mkdir -p "$GITHUB_WORKSPACE/out"
           cp amneziawg.ko "$GITHUB_WORKSPACE/out/amneziawg.ko"
           cp Module.symvers "$GITHUB_WORKSPACE/out/Module.symvers" || true
-
-      - name: Verify module
-        run: |
-          set -eux
-          file out/amneziawg.ko
-          strings out/amneziawg.ko | grep 'vermagic=5.4.213 SMP preempt mod_unload aarch64'
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
