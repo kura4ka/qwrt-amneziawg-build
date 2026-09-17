@@ -22,6 +22,7 @@ jobs:
           sed -i '/^CONFIG_LOCALVERSION_AUTO=/d' .config
           echo '# CONFIG_LOCALVERSION_AUTO is not set' >> .config
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= prepare modules_prepare
+          sh "$GITHUB_WORKSPACE/scripts/patch-qwrt-arm64-module-header.sh" "$PWD"
           sh "$GITHUB_WORKSPACE/scripts/force-qwrt-module-abi.sh" "$PWD"
           test "$(cat include/config/kernel.release)" = 5.4.213
           test "$(make -s ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= kernelrelease)" = 5.4.213
@@ -35,7 +36,7 @@ jobs:
           printf 'obj-m += abi_probe.o\n' > abi_probe/Makefile
           make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M="$GITHUB_WORKSPACE/abi_probe" modules
           size="$(readelf -Ws abi_probe/abi_probe.o | awk '$8=="qws_module_size_probe"{print $3;exit}')"
-          echo "QSDK struct module size=$size"
+          echo "QWRT-compatible struct module size=$size"
           test "$size" = 768
           readelf -S abi_probe/abi_probe.ko | grep -F '.gnu.linkonce.this_module'
       - name: Kernel dependencies
