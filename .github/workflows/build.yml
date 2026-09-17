@@ -63,28 +63,36 @@ jobs:
               raise SystemExit("COMPAT_INIT_CRYPTO block not found")
           s = s.replace(needle, replacement, 1)
 
-          # QSDK's crypto/chacha.h uses the same include guard as the original
-          # AWG compatibility header. For QSDK 5.4, include our wrapper explicitly.
+          # QSDK's kernel ChaCha header lacks the API required by AWG. Select the
+          # local wrapper, which uses the bundled Zinc implementation.
           old = '#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0)\n#include <crypto/chacha.h>'
           new = '''#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0)\n#if defined(ISQSDK) && LINUX_VERSION_CODE < KERNEL_VERSION(5, 5, 0)\n#include "crypto/chacha/include/crypto/chacha.h"\n#else\n#include <crypto/chacha.h>\n#endif'''
           if old not in s:
               raise SystemExit("ChaCha include block not found")
           s = s.replace(old, new, 1)
 
-          # QSDK already defines CHACHA_BLOCK_SIZE. Use Zinc's equivalent for the
-          # local compatibility struct without redefining the kernel macro.
           old = "(CHACHA_BLOCK_SIZE / sizeof(u32))"
           new = "(CHACHA20_BLOCK_SIZE / sizeof(u32))"
           if old not in s:
               raise SystemExit("CHACHA_BLOCK_SIZE expression not found")
           s = s.replace(old, new, 1)
 
-          # QSDK 5.4's kernel blake2s header is incompatible with AWG's bundled
-          # Zinc header. The compatibility shim is only needed for newer kernels.
-          old = '#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 19, 0)\n#include <crypto/blake2s.h>'
-          new = '#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 19, 0) && !defined(ISQSDK)\n#include <crypto/blake2s.h>'
+          # The QSDK kernel blake2s header conflicts with Zinc. Provide the
+          # WireGuard-compatible API from Zinc and make the source include Zinc.
+          old = '#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 19, 0)\n#include <crypto/blake2s.h>\n#define blake2s_ctx blake2s_state\n#define blake2s(key, keylen, in, inlen, out, outlen) \\\n\tblake2s(out, in, key, outlen, inlen, keylen)\n#endif'
+          new = '''#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 19, 0)\n#if defined(ISQSDK)\n#include <zinc/blake2s.h>\n#define blake2s_ctx blake2s_state\n#define blake2s(key, keylen, in, inlen, out, outlen) \\\n\tblake2s(out, in, key, outlen, inlen, keylen)\n#else\n#include <crypto/blake2s.h>\n#define blake2s_ctx blake2s_state\n#define blake2s(key, keylen, in, inlen, out, outlen) \\\n\tblake2s(out, in, key, outlen, inlen, keylen)\n#endif\n#endif'''
           if old not in s:
               raise SystemExit("blake2s compatibility block not found")
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          # messages.h otherwise explicitly includes the QSDK kernel blake2s API.
+          p = Path("awg/src/messages.h")
+          s = p.read_text()
+          old = '#include <crypto/blake2s.h>'
+          new = '#if defined(ISQSDK)\n#include <zinc/blake2s.h>\n#else\n#include <crypto/blake2s.h>\n#endif'
+          if old not in s:
+              raise SystemExit("messages.h blake2s include not found")
           s = s.replace(old, new, 1)
           p.write_text(s)
 
@@ -96,7 +104,7 @@ jobs:
           s = s.replace("#endif /* _CRYPTO_CHACHA_H */", "#endif /* __AWG_COMPAT_CRYPTO_CHACHA_H */", 1)
           p.write_text(s)
 
-          # No separate -include is needed: compat.h explicitly selects the wrapper.
+          # No separate -include is needed: compat.h explicitly selects the wrappers.
           p = Path("awg/src/compat/Kbuild.include")
           s = p.read_text()
           marker = "ccflags-y += -include $(kbuild-dir)/compat/crypto/chacha/include/crypto/chacha.h"
@@ -106,7 +114,8 @@ jobs:
           PY
 
           sed -n '890,905p' awg/src/compat/compat.h
-          sed -n '1398,1432p' awg/src/compat/compat.h
+          sed -n '1398,1440p' awg/src/compat/compat.h
+          sed -n '1,18p' awg/src/messages.h
 
       - name: Build AmneziaWG kernel module
         run: |
