@@ -3,8 +3,8 @@
  * Compatibility wrapper for kernels without the ChaCha library API.
  */
 
-#ifndef _CRYPTO_CHACHA_H
-#define _CRYPTO_CHACHA_H
+#ifndef __AWG_COMPAT_CRYPTO_CHACHA_H
+#define __AWG_COMPAT_CRYPTO_CHACHA_H
 
 #include <linux/string.h>
 #include <zinc/chacha20.h>
@@ -44,4 +44,4 @@ static inline void chacha20_crypt(u32 *state, u8 *dst, const u8 *src,
 	memcpy(state, ctx.state, sizeof(ctx.state));
 }
 
-#endif /* _CRYPTO_CHACHA_H */
+#endif /* __AWG_COMPAT_CRYPTO_CHACHA_H */
