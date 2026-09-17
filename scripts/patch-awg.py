@@ -35,3 +35,25 @@ s = p.read_text().replace('#ifndef _CRYPTO_CHACHA_H', '#ifndef __AWG_COMPAT_CRYP
 s = s.replace('#define _CRYPTO_CHACHA_H', '#define __AWG_COMPAT_CRYPTO_CHACHA_H', 1)
 s = s.replace('#endif /* _CRYPTO_CHACHA_H */', '#endif /* __AWG_COMPAT_CRYPTO_CHACHA_H */', 1)
 p.write_text(s)
+
+p = Path('awg/src/main.c')
+s = p.read_text()
+s = s.replace(
+    'static int __init wg_mod_init(void)\n{\n\tint ret;\n',
+    'static int __init wg_mod_init(void)\n{\n\tint ret;\n\tpr_err("AWGDBG: init start\\n");\n', 1)
+s = s.replace(
+    '\tret = wg_allowedips_slab_init();\n\tif (ret < 0)\n\t\tgoto err_allowedips;',
+    '\tret = wg_allowedips_slab_init();\n\tpr_err("AWGDBG: allowedips_slab_init=%d\\n", ret);\n\tif (ret < 0)\n\t\tgoto err_allowedips;', 1)
+s = s.replace(
+    '\tret = wg_peer_init();\n\tif (ret < 0)\n\t\tgoto err_peer;',
+    '\tret = wg_peer_init();\n\tpr_err("AWGDBG: peer_init=%d\\n", ret);\n\tif (ret < 0)\n\t\tgoto err_peer;', 1)
+s = s.replace(
+    '\tret = wg_device_init();\n\tif (ret < 0)\n\t\tgoto err_device;',
+    '\tret = wg_device_init();\n\tpr_err("AWGDBG: device_init=%d\\n", ret);\n\tif (ret < 0)\n\t\tgoto err_device;', 1)
+s = s.replace(
+    '\tret = wg_genetlink_init();\n\tif (ret < 0)\n\t\tgoto err_netlink;',
+    '\tret = wg_genetlink_init();\n\tpr_err("AWGDBG: genetlink_init=%d\\n", ret);\n\tif (ret < 0)\n\t\tgoto err_netlink;', 1)
+s = s.replace(
+    '\treturn 0;\n}\n\nstatic void __exit wg_mod_exit(void)',
+    '\tpr_err("AWGDBG: init success\\n");\n\treturn 0;\n}\n\nstatic void __exit wg_mod_exit(void)', 1)
+p.write_text(s)
