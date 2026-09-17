@@ -24,15 +24,21 @@ jobs:
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= prepare modules_prepare
           echo "kernel.release=$(cat include/config/kernel.release)"
           test "$(cat include/config/kernel.release)" = 5.4.213
-          # Build the kernel's configured modules so Kbuild generates a real
-          # Module.symvers containing exports from module-backed symbols such
-          # as udp_tunnel/ip6_udp_tunnel. External AWG builds without this
-          # table silently produce a module with an empty depends= field.
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= -j"$(nproc)" vmlinux modules
-          test -s Module.symvers
-          grep -Eq '(^|[[:space:]])udp_tunnel([[:space:]]|$)' Module.symvers || true
-          grep -Eq '(^|[[:space:]])ip6_udp_tunnel([[:space:]]|$)' Module.symvers || true
           echo "KDIR=$PWD" >> "$GITHUB_ENV"
+      - name: Kernel dependency symbol modules
+        run: |
+          set -eux
+          mkdir -p "$GITHUB_WORKSPACE/depmods"
+          ln -s "$KDIR/net/ipv4/udp_tunnel.c" "$GITHUB_WORKSPACE/depmods/udp_tunnel.c"
+          ln -s "$KDIR/net/ipv6/ip6_udp_tunnel.c" "$GITHUB_WORKSPACE/depmods/ip6_udp_tunnel.c"
+          cat > "$GITHUB_WORKSPACE/depmods/Makefile" <<'EOF'
+          obj-m += udp_tunnel.o
+          obj-m += ip6_udp_tunnel.o
+          EOF
+          make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M="$GITHUB_WORKSPACE/depmods" KCFLAGS="-Wno-error=dangling-pointer -Wno-dangling-pointer" modules
+          test -s "$GITHUB_WORKSPACE/depmods/Module.symvers"
+          grep -Eq '[[:space:]]udp_tunnel[[:space:]]' "$GITHUB_WORKSPACE/depmods/Module.symvers"
+          grep -Eq '[[:space:]]ip6_udp_tunnel[[:space:]]' "$GITHUB_WORKSPACE/depmods/Module.symvers"
       - name: AWG
         run: |
           set -eux
@@ -53,17 +59,17 @@ jobs:
           p=Path('awg/src/compat/crypto/chacha/include/crypto/chacha.h'); s=p.read_text().replace('#ifndef _CRYPTO_CHACHA_H','#ifndef __AWG_COMPAT_CRYPTO_CHACHA_H',1).replace('#define _CRYPTO_CHACHA_H','#define __AWG_COMPAT_CRYPTO_CHACHA_H',1).replace('#endif /* _CRYPTO_CHACHA_H */','#endif /* __AWG_COMPAT_CRYPTO_CHACHA_H */',1); p.write_text(s)
           PY
           cd awg/src
-          make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M="$PWD" CONFIG_AMNEZIAWG=m WIREGUARD_VERSION=3.1.20260906 EXTRA_CFLAGS="-DISQSDK -Wno-stringop-overread" V=1 modules
+          make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M="$PWD" KBUILD_EXTRA_SYMBOLS="$GITHUB_WORKSPACE/depmods/Module.symvers" CONFIG_AMNEZIAWG=m WIREGUARD_VERSION=3.1.20260906 EXTRA_CFLAGS="-DISQSDK -Wno-stringop-overread" V=1 modules
           test -f amneziawg.ko
           test "$(modinfo -F vermagic ./amneziawg.ko)" = '5.4.213 SMP preempt mod_unload aarch64'
           deps="$(modinfo -F depends ./amneziawg.ko)"
           echo "AWG depends=$deps"
-          test -n "$deps"
           printf '%s\n' "$deps" | tr ',' '\n' | grep -qx 'udp_tunnel'
           printf '%s\n' "$deps" | tr ',' '\n' | grep -qx 'ip6_udp_tunnel'
           mkdir -p "$GITHUB_WORKSPACE/out"
           cp amneziawg.ko "$GITHUB_WORKSPACE/out/"
           cp Module.symvers "$GITHUB_WORKSPACE/out/"
+          cp "$GITHUB_WORKSPACE/depmods/Module.symvers" "$GITHUB_WORKSPACE/out/kernel-depends.symvers"
           printf '%s\n' "$deps" > "$GITHUB_WORKSPACE/out/amneziawg.depends"
       - uses: actions/upload-artifact@v4
         with:
