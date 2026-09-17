@@ -72,18 +72,16 @@ jobs:
               raise SystemExit("ChaCha include block not found")
           s = s.replace(old, new, 1)
 
-          # The QSDK kernel already supplies CHACHA_BLOCK_SIZE. The wrapper
-          # supplies only the missing API, so use Zinc's block-size constant for
-          # the compatibility struct instead of redefining the kernel macro.
-          old = '#ifndef CHACHA_STATE_WORDS\n#define CHACHA_STATE_WORDS\\t(CHACHA_BLOCK_SIZE / sizeof(u32))\n#endif'
-          new = '#ifndef CHACHA_STATE_WORDS\n#define CHACHA_STATE_WORDS\\t(CHACHA20_BLOCK_SIZE / sizeof(u32))\n#endif'
+          # QSDK already defines CHACHA_BLOCK_SIZE. The wrapper supplies the
+          # missing API, while Zinc supplies the equivalent block-size constant.
+          old = "(CHACHA_BLOCK_SIZE / sizeof(u32))"
+          new = "(CHACHA20_BLOCK_SIZE / sizeof(u32))"
           if old not in s:
-              raise SystemExit("CHACHA_STATE_WORDS block not found")
+              raise SystemExit("CHACHA_BLOCK_SIZE expression not found")
           s = s.replace(old, new, 1)
           p.write_text(s)
 
-          # The compatibility header has a private guard to avoid colliding with
-          # QSDK's include/crypto/chacha.h guard.
+          # Keep the compatibility header's guard distinct from QSDK's kernel guard.
           p = Path("awg/src/compat/crypto/chacha/include/crypto/chacha.h")
           s = p.read_text()
           s = s.replace("#ifndef _CRYPTO_CHACHA_H", "#ifndef __AWG_COMPAT_CRYPTO_CHACHA_H", 1)
@@ -91,23 +89,12 @@ jobs:
           s = s.replace("#endif /* _CRYPTO_CHACHA_H */", "#endif /* __AWG_COMPAT_CRYPTO_CHACHA_H */", 1)
           p.write_text(s)
 
-          # Remove the previous -include experiment if it is present.
+          # Ensure the old experimental -include injection is absent.
           p = Path("awg/src/compat/Kbuild.include")
           s = p.read_text()
-          start = "ifeq ($(shell [ $(VERSION) -lt 5 -o \\( $(VERSION) -eq 5 -a $(PATCHLEVEL) -lt 5 \\) ] && echo y),y)"
-          if start in s:
-              lines = s.splitlines(True)
-              out = []
-              skip = 0
-              for line in lines:
-                  if skip:
-                      skip -= 1
-                      continue
-                  if line.rstrip("\\n") == start:
-                      skip = 2
-                      continue
-                  out.append(line)
-              s = ''.join(out)
+          marker = "ccflags-y += -include $(kbuild-dir)/compat/crypto/chacha/include/crypto/chacha.h"
+          if marker in s:
+              s = s.replace(marker + "\n", "")
           p.write_text(s)
           PY
 
