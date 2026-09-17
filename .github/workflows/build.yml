@@ -15,7 +15,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev dwarves device-tree-compiler gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu cpio rsync wget xz-utils git
+          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev dwarves device-tree-compiler gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu cpio rsync wget xz-utils git kmod
 
       - name: Fetch QSDK 5.4.213 kernel source
         run: |
@@ -34,6 +34,8 @@ jobs:
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- prepare modules_prepare
           echo "Kernel version: $(make -s ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- kernelversion)"
+          echo "Kernel release: $(cat include/config/kernel.release)"
+          grep -E '^(CONFIG_MODULES|CONFIG_MODULE_UNLOAD|CONFIG_MODVERSIONS|CONFIG_LOCALVERSION|CONFIG_MODULE_STRIPPED)' .config || true
 
       - name: Fetch AmneziaWG
         run: |
@@ -94,7 +96,6 @@ jobs:
           s = s.replace("#endif /* _CRYPTO_CHACHA_H */", "#endif /* __AWG_COMPAT_CRYPTO_CHACHA_H */", 1)
           p.write_text(s)
           PY
-          sed -n '1398,1440p' awg/src/compat/compat.h
 
       - name: Build AmneziaWG kernel module
         run: |
@@ -102,7 +103,17 @@ jobs:
           cd awg/src
           make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- M="$PWD" CONFIG_AMNEZIAWG=m WIREGUARD_VERSION=3.1.20260906 EXTRA_CFLAGS="-DISQSDK -Wno-stringop-overread" V=1 modules
           test -f amneziawg.ko
-          strings ./amneziawg.ko | grep 'vermagic=5.4.213 SMP preempt mod_unload aarch64'
+          echo '=== module vermagic ==='
+          strings -a ./amneziawg.ko | grep -E 'vermagic|5\.4\.213|SMP|preempt|aarch64' || true
+          echo '=== modinfo ==='
+          modinfo ./amneziawg.ko || true
+          echo '=== .modinfo ==='
+          aarch64-linux-gnu-readelf -p .modinfo ./amneziawg.ko || true
+          VERMAGIC="$(modinfo -F vermagic ./amneziawg.ko 2>/dev/null || true)"
+          if [ -z "$VERMAGIC" ]; then
+            VERMAGIC="$(strings -a ./amneziawg.ko | sed -n 's/^vermagic=//p' | head -n1)"
+          fi
+          test "$VERMAGIC" = '5.4.213 SMP preempt mod_unload aarch64'
           mkdir -p "$GITHUB_WORKSPACE/out"
           cp amneziawg.ko "$GITHUB_WORKSPACE/out/amneziawg.ko"
           cp Module.symvers "$GITHUB_WORKSPACE/out/Module.symvers" || true
