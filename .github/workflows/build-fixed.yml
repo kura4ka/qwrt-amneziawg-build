@@ -66,11 +66,20 @@ jobs:
           echo "AWG depends=$deps"
           printf '%s\n' "$deps" | tr ',' '\n' | grep -qx udp_tunnel
           printf '%s\n' "$deps" | tr ',' '\n' | grep -qx ip6_udp_tunnel
-          echo '=== AWG module metadata ==='
+          echo '=== AWG module metadata before QWRT-style strip ==='
           readelf -S amneziawg.ko
           readelf -Ws amneziawg.ko | grep -E '(__this_module|amneziawg)' || true
+          cp amneziawg.ko amneziawg-raw.ko
+          aarch64-linux-gnu-strip -g -S -d --strip-unneeded amneziawg.ko
+          echo '=== AWG module metadata after QWRT-style strip ==='
+          readelf -S amneziawg.ko
+          readelf -Ws amneziawg.ko | grep -E '(__this_module|amneziawg)' || true
+          test "$(readelf -Ws amneziawg.ko | awk '$8=="__this_module"{print $3;exit}')" = 768
+          test -z "$(readelf -S amneziawg.ko | grep -E '\.(eh_frame|comment)$' || true)"
+          test "$(modinfo -F vermagic ./amneziawg.ko)" = '5.4.213 SMP preempt mod_unload aarch64'
           mkdir -p "$GITHUB_WORKSPACE/out"
           cp amneziawg.ko "$GITHUB_WORKSPACE/out/"
+          cp amneziawg-raw.ko "$GITHUB_WORKSPACE/out/"
           cp Module.symvers "$GITHUB_WORKSPACE/out/"
           cp "$GITHUB_WORKSPACE/depmods/Module.symvers" "$GITHUB_WORKSPACE/out/kernel-depends.symvers"
           printf '%s\n' "$deps" > "$GITHUB_WORKSPACE/out/amneziawg.depends"
