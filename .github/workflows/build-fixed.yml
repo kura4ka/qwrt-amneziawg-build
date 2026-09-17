@@ -19,9 +19,9 @@ jobs:
           cp "$GITHUB_WORKSPACE/config/qwrt-5.4.213.config" .config
           sed -i '/^CONFIG_LOCALVERSION_AUTO=/d' .config
           echo '# CONFIG_LOCALVERSION_AUTO is not set' >> .config
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= olddefconfig
           grep -q '^# CONFIG_LOCALVERSION_AUTO is not set$' .config
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- prepare modules_prepare
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= prepare modules_prepare
           echo "kernel.release=$(cat include/config/kernel.release)"
           test "$(cat include/config/kernel.release)" = 5.4.213
           echo "KDIR=$PWD" >> "$GITHUB_ENV"
@@ -45,7 +45,7 @@ jobs:
           p=Path('awg/src/compat/crypto/chacha/include/crypto/chacha.h'); s=p.read_text().replace('#ifndef _CRYPTO_CHACHA_H','#ifndef __AWG_COMPAT_CRYPTO_CHACHA_H',1).replace('#define _CRYPTO_CHACHA_H','#define __AWG_COMPAT_CRYPTO_CHACHA_H',1).replace('#endif /* _CRYPTO_CHACHA_H */','#endif /* __AWG_COMPAT_CRYPTO_CHACHA_H */',1); p.write_text(s)
           PY
           cd awg/src
-          make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- M="$PWD" CONFIG_AMNEZIAWG=m WIREGUARD_VERSION=3.1.20260906 EXTRA_CFLAGS="-DISQSDK -Wno-stringop-overread" V=1 modules
+          make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M="$PWD" CONFIG_AMNEZIAWG=m WIREGUARD_VERSION=3.1.20260906 EXTRA_CFLAGS="-DISQSDK -Wno-stringop-overread" V=1 modules
           test -f amneziawg.ko
           test "$(modinfo -F vermagic ./amneziawg.ko)" = '5.4.213 SMP preempt mod_unload aarch64'
           mkdir -p "$GITHUB_WORKSPACE/out"
