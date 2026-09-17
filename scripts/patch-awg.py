@@ -61,10 +61,103 @@ p.write_text(s)
 p = Path('awg/src/netlink.c')
 s = p.read_text()
 needle = '#include <net/genetlink.h>\n'
-probe = '''
+probe = r'''
 static int awg_probe_doit(struct sk_buff *skb, struct genl_info *info)
 {
 \treturn 0;
+}
+
+static int awg_probe_start(struct netlink_callback *cb)
+{
+\treturn 0;
+}
+
+static int awg_probe_dumpit(struct sk_buff *skb, struct netlink_callback *cb)
+{
+\treturn 0;
+}
+
+static int awg_probe_done(struct netlink_callback *cb)
+{
+\treturn 0;
+}
+
+static void awg_probe_result(const char *tag, struct genl_family *family, int ret)
+{
+\tpr_err("AWGDBG: %s=%d ops=%px n_ops=%u name=%s maxattr=%u policy=%px module=%px netnsok=%u parallel_ops=%u\\n",
+\t       tag, ret, family->ops, family->n_ops, family->name,
+\t       family->maxattr, family->policy, family->module,
+\t       family->netnsok, family->parallel_ops);
+\tif (!ret)
+\t\tgenl_unregister_family(family);
+}
+
+static void awg_genl_probe_matrix(void)
+{
+\tstatic const struct genl_ops cmd0_ops[] = {
+\t\t{ .cmd = 0, .doit = awg_probe_doit },
+\t};
+\tstatic struct genl_family cmd0_family = {
+\t\t.name = "awgprobe2",
+\t\t.version = 1,
+\t\t.ops = cmd0_ops,
+\t\t.n_ops = ARRAY_SIZE(cmd0_ops),
+\t\t.module = THIS_MODULE,
+\t};
+\tstatic const struct genl_ops two_doit_ops[] = {
+\t\t{ .cmd = 0, .doit = awg_probe_doit },
+\t\t{ .cmd = 1, .doit = awg_probe_doit },
+\t};
+\tstatic struct genl_family two_doit_family = {
+\t\t.name = "awgprobe3",
+\t\t.version = 1,
+\t\t.ops = two_doit_ops,
+\t\t.n_ops = ARRAY_SIZE(two_doit_ops),
+\t\t.module = THIS_MODULE,
+\t};
+\tstatic const struct genl_ops two_flags_ops[] = {
+\t\t{ .cmd = 0, .doit = awg_probe_doit, .flags = GENL_UNS_ADMIN_PERM },
+\t\t{ .cmd = 1, .doit = awg_probe_doit, .flags = GENL_UNS_ADMIN_PERM },
+\t};
+\tstatic struct genl_family two_flags_family = {
+\t\t.name = "awgprobe4",
+\t\t.version = 1,
+\t\t.ops = two_flags_ops,
+\t\t.n_ops = ARRAY_SIZE(two_flags_ops),
+\t\t.module = THIS_MODULE,
+\t};
+\tstatic const struct genl_ops dump_ops[] = {
+\t\t{ .cmd = 0, .dumpit = awg_probe_dumpit },
+\t};
+\tstatic struct genl_family dump_family = {
+\t\t.name = "awgprobe5",
+\t\t.version = 1,
+\t\t.ops = dump_ops,
+\t\t.n_ops = ARRAY_SIZE(dump_ops),
+\t\t.module = THIS_MODULE,
+\t};
+\tstatic const struct genl_ops dump_full_ops[] = {
+\t\t{ .cmd = 0, .start = awg_probe_start, .dumpit = awg_probe_dumpit,
+\t\t  .done = awg_probe_done, .flags = GENL_UNS_ADMIN_PERM },
+\t};
+\tstatic struct genl_family dump_full_family = {
+\t\t.name = "awgprobe6",
+\t\t.version = 1,
+\t\t.ops = dump_full_ops,
+\t\t.n_ops = ARRAY_SIZE(dump_full_ops),
+\t\t.module = THIS_MODULE,
+\t};
+
+\tawg_probe_result("probe_cmd0", &cmd0_family,
+\t\t       genl_register_family(&cmd0_family));
+\tawg_probe_result("probe_two_doit", &two_doit_family,
+\t\t       genl_register_family(&two_doit_family));
+\tawg_probe_result("probe_two_flags", &two_flags_family,
+\t\t       genl_register_family(&two_flags_family));
+\tawg_probe_result("probe_dump", &dump_family,
+\t\t       genl_register_family(&dump_family));
+\tawg_probe_result("probe_dump_full", &dump_full_family,
+\t\t       genl_register_family(&dump_full_family));
 }
 
 static int awg_genl_probe_empty(void)
@@ -102,39 +195,50 @@ static int awg_genl_probe_oneop(void)
 \treturn ret;
 }
 '''
-if probe not in s:
+# Convert literal \\t introduced by raw string to actual tabs.
+probe = probe.replace('\\t', '\t')
+if 'awg_genl_probe_matrix' not in s:
     s = s.replace(needle, needle + probe, 1)
 
-old = '''int __init wg_genetlink_init(void)
+old = r'''int __init wg_genetlink_init(void)
 {
-\tpr_err("AWGDBG: MCGRPS_OFF_BUILD\\n");
-\tpr_err("AWGDBG: genl sizeof_family=%zu sizeof_ops=%zu name=%s n_ops=%u n_mcgrps=%u\\n",
-\t       sizeof(genl_family), sizeof(genl_ops), genl_family.name,
-\t       genl_family.n_ops, genl_family.n_mcgrps);
-\tpr_err("AWGDBG: genl op0 cmd=%u doit=%px dumpit=%px; op1 cmd=%u doit=%px dumpit=%px\\n",
-\t       genl_ops[0].cmd, genl_ops[0].doit, genl_ops[0].dumpit,
-\t       genl_ops[1].cmd, genl_ops[1].doit, genl_ops[1].dumpit);
-\tpr_err("AWGDBG: genl mcgrp0 name=%s\\n", genl_family.n_mcgrps ? genl_family.mcgrps[0].name : "<none>");
-\treturn genl_register_family(&genl_family);
+	pr_err("AWGDBG: PROBE_BEGIN\\n");
+	awg_genl_probe_empty();
+	awg_genl_probe_oneop();
+	pr_err("AWGDBG: MCGRPS_OFF_BUILD\\n");
+	pr_err("AWGDBG: genl sizeof_family=%zu sizeof_ops=%zu name=%s n_ops=%u n_mcgrps=%u\\n",
+	       sizeof(genl_family), sizeof(genl_ops), genl_family.name,
+	       genl_family.n_ops, genl_family.n_mcgrps);
+	pr_err("AWGDBG: family.ops=%px genl_ops=%px maxattr=%u policy=%px module=%px netnsok=%u parallel_ops=%u\\n",
+	       genl_family.ops, genl_ops, genl_family.maxattr, genl_family.policy,
+	       genl_family.module, genl_family.netnsok, genl_family.parallel_ops);
+	pr_err("AWGDBG: genl op0 cmd=%u doit=%px dumpit=%px; op1 cmd=%u doit=%px dumpit=%px\\n",
+	       genl_ops[0].cmd, genl_ops[0].doit, genl_ops[0].dumpit,
+	       genl_ops[1].cmd, genl_ops[1].doit, genl_ops[1].dumpit);
+	pr_err("AWGDBG: genl mcgrp0 name=%s\\n", genl_family.n_mcgrps ? genl_family.mcgrps[0].name : "<none>");
+	return genl_register_family(&genl_family);
 }'''
-new = '''int __init wg_genetlink_init(void)
+# The exact text in the generated file uses normal escaped C strings.
+old = old.replace('\\t','\t')
+new = r'''int __init wg_genetlink_init(void)
 {
-\tpr_err("AWGDBG: PROBE_BEGIN\\n");
-\tawg_genl_probe_empty();
-\tawg_genl_probe_oneop();
-\tpr_err("AWGDBG: MCGRPS_OFF_BUILD\\n");
-\tpr_err("AWGDBG: genl sizeof_family=%zu sizeof_ops=%zu name=%s n_ops=%u n_mcgrps=%u\\n",
-\t       sizeof(genl_family), sizeof(genl_ops), genl_family.name,
-\t       genl_family.n_ops, genl_family.n_mcgrps);
-\tpr_err("AWGDBG: family.ops=%px genl_ops=%px maxattr=%u policy=%px module=%px netnsok=%u parallel_ops=%u\\n",
-\t       genl_family.ops, genl_ops, genl_family.maxattr, genl_family.policy,
-\t       genl_family.module, genl_family.netnsok, genl_family.parallel_ops);
-\tpr_err("AWGDBG: genl op0 cmd=%u doit=%px dumpit=%px; op1 cmd=%u doit=%px dumpit=%px\\n",
-\t       genl_ops[0].cmd, genl_ops[0].doit, genl_ops[0].dumpit,
-\t       genl_ops[1].cmd, genl_ops[1].doit, genl_ops[1].dumpit);
-\tpr_err("AWGDBG: genl mcgrp0 name=%s\\n", genl_family.n_mcgrps ? genl_family.mcgrps[0].name : "<none>");
-\treturn genl_register_family(&genl_family);
-}'''
+	pr_err("AWGDBG: PROBE_BEGIN\\n");
+	awg_genl_probe_empty();
+	awg_genl_probe_oneop();
+	awg_genl_probe_matrix();
+	pr_err("AWGDBG: MCGRPS_OFF_BUILD\\n");
+	pr_err("AWGDBG: genl sizeof_family=%zu sizeof_ops=%zu name=%s n_ops=%u n_mcgrps=%u\\n",
+	       sizeof(genl_family), sizeof(genl_ops), genl_family.name,
+	       genl_family.n_ops, genl_family.n_mcgrps);
+	pr_err("AWGDBG: family.ops=%px genl_ops=%px maxattr=%u policy=%px module=%px netnsok=%u parallel_ops=%u\\n",
+	       genl_family.ops, genl_ops, genl_family.maxattr, genl_family.policy,
+	       genl_family.module, genl_family.netnsok, genl_family.parallel_ops);
+	pr_err("AWGDBG: genl op0 cmd=%u doit=%px dumpit=%px; op1 cmd=%u doit=%px dumpit=%px\\n",
+	       genl_ops[0].cmd, genl_ops[0].doit, genl_ops[0].dumpit,
+	       genl_ops[1].cmd, genl_ops[1].doit, genl_ops[1].dumpit);
+	pr_err("AWGDBG: genl mcgrp0 name=%s\\n", genl_family.n_mcgrps ? genl_family.mcgrps[0].name : "<none>");
+	return genl_register_family(&genl_family);
+}'''.replace('\\t','\t')
 if old not in s:
     raise SystemExit('expected netlink init block not found')
 s = s.replace(old, new, 1)
