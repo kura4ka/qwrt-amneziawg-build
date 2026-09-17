@@ -56,28 +56,35 @@ jobs:
           s = p.read_text()
 
           # QSDK 12.5 is based on 5.4.213 but carries backported crypto APIs.
-          # Disable AWG's old crypto-init compatibility implementation.
-          old = "&& LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0) && !defined(ISUBUNTU2004)"
-          new = "&& LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0) && !defined(ISUBUNTU2004) && !defined(ISQSDK)"
-          if old not in s:
-              raise SystemExit("COMPAT_INIT_CRYPTO condition not found")
-          s = s.replace(old, new, 1)
+          # Do not enable AWG's old crypto-init compatibility implementation.
+          needle = " && !defined(ISUBUNTU2004)\n#define COMPAT_INIT_CRYPTO"
+          replacement = " && !defined(ISUBUNTU2004) && !defined(ISQSDK)\n#define COMPAT_INIT_CRYPTO"
+          if needle not in s:
+              raise SystemExit("COMPAT_INIT_CRYPTO block not found")
+          s = s.replace(needle, replacement, 1)
 
           # QSDK's crypto/chacha.h uses the same include guard as the original
-          # AWG compatibility header. For QSDK 5.4, include our wrapper with a
-          # private guard so chacha_init()/chacha20_crypt() are available.
+          # AWG compatibility header. For QSDK 5.4, include our wrapper explicitly.
           old = '#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0)\n#include <crypto/chacha.h>'
           new = '''#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0)\n#if defined(ISQSDK) && LINUX_VERSION_CODE < KERNEL_VERSION(5, 5, 0)\n#include "crypto/chacha/include/crypto/chacha.h"\n#else\n#include <crypto/chacha.h>\n#endif'''
           if old not in s:
               raise SystemExit("ChaCha include block not found")
           s = s.replace(old, new, 1)
 
-          # QSDK already defines CHACHA_BLOCK_SIZE. The wrapper supplies the
-          # missing API, while Zinc supplies the equivalent block-size constant.
+          # QSDK already defines CHACHA_BLOCK_SIZE. Use Zinc's equivalent for the
+          # local compatibility struct without redefining the kernel macro.
           old = "(CHACHA_BLOCK_SIZE / sizeof(u32))"
           new = "(CHACHA20_BLOCK_SIZE / sizeof(u32))"
           if old not in s:
               raise SystemExit("CHACHA_BLOCK_SIZE expression not found")
+          s = s.replace(old, new, 1)
+
+          # QSDK 5.4's kernel blake2s header is incompatible with AWG's bundled
+          # Zinc header. The compatibility shim is only needed for newer kernels.
+          old = '#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 19, 0)\n#include <crypto/blake2s.h>'
+          new = '#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 19, 0) && !defined(ISQSDK)\n#include <crypto/blake2s.h>'
+          if old not in s:
+              raise SystemExit("blake2s compatibility block not found")
           s = s.replace(old, new, 1)
           p.write_text(s)
 
@@ -89,7 +96,7 @@ jobs:
           s = s.replace("#endif /* _CRYPTO_CHACHA_H */", "#endif /* __AWG_COMPAT_CRYPTO_CHACHA_H */", 1)
           p.write_text(s)
 
-          # Ensure the old experimental -include injection is absent.
+          # No separate -include is needed: compat.h explicitly selects the wrapper.
           p = Path("awg/src/compat/Kbuild.include")
           s = p.read_text()
           marker = "ccflags-y += -include $(kbuild-dir)/compat/crypto/chacha/include/crypto/chacha.h"
@@ -98,10 +105,8 @@ jobs:
           p.write_text(s)
           PY
 
-          grep -n -A10 -B2 'LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0)' awg/src/compat/compat.h
-          grep -n 'CHACHA_STATE_WORDS' awg/src/compat/compat.h
-          grep -n 'COMPAT_INIT_CRYPTO' awg/src/compat/compat.h || true
-          grep -n 'compat/crypto/chacha/include' awg/src/compat/Kbuild.include || true
+          sed -n '890,905p' awg/src/compat/compat.h
+          sed -n '1398,1432p' awg/src/compat/compat.h
 
       - name: Build AmneziaWG kernel module
         run: |
