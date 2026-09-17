@@ -57,3 +57,10 @@ s = s.replace(
     '\treturn 0;\n}\n\nstatic void __exit wg_mod_exit(void)',
     '\tpr_err("AWGDBG: init success\\n");\n\treturn 0;\n}\n\nstatic void __exit wg_mod_exit(void)', 1)
 p.write_text(s)
+
+p = Path('awg/src/netlink.c')
+s = p.read_text()
+s = s.replace(
+    'int __init wg_genetlink_init(void)\n{\n\treturn genl_register_family(&genl_family);\n}',
+    'int __init wg_genetlink_init(void)\n{\n\tpr_err("AWGDBG: genl sizeof_family=%zu sizeof_ops=%zu name=%s n_ops=%u n_mcgrps=%u\\n",\n\t       sizeof(genl_family), sizeof(genl_ops), genl_family.name,\n\t       genl_family.n_ops, genl_family.n_mcgrps);\n\tpr_err("AWGDBG: genl op0 cmd=%u doit=%px dumpit=%px; op1 cmd=%u doit=%px dumpit=%px\\n",\n\t       genl_ops[0].cmd, genl_ops[0].doit, genl_ops[0].dumpit,\n\t       genl_ops[1].cmd, genl_ops[1].doit, genl_ops[1].dumpit);\n\tpr_err("AWGDBG: genl mcgrp0 name=%s\\n", genl_family.n_mcgrps ? genl_family.mcgrps[0].name : "<none>");\n\treturn genl_register_family(&genl_family);\n}', 1)
+p.write_text(s)
