@@ -43,28 +43,49 @@ jobs:
           set -eux
           git clone --depth 1 --branch v3.1.20260906 https://github.com/amnezia-vpn/amneziawg-linux-kernel-module.git awg
 
-      - name: Apply Linux 5.4 ChaCha compatibility fix
+      - name: Apply Linux 5.4 ChaCha and QSDK compatibility fixes
         run: |
           set -eux
           mkdir -p awg/src/compat/crypto/chacha/include/crypto
           cp "$GITHUB_WORKSPACE/patches/chacha.h" awg/src/compat/crypto/chacha/include/crypto/chacha.h
+
           python3 - <<'PY'
           from pathlib import Path
+
+          # QSDK 12.5 is based on 5.4.213 but carries backported crypto APIs.
+          # AWG's generic 5.4 compatibility path enables COMPAT_INIT_CRYPTO
+          # based only on the kernel version, which causes undeclared
+          # chacha20_mod_init()/... calls with this QSDK tree.
+          p = Path("awg/src/compat/compat.h")
+          s = p.read_text()
+          old = "&& LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0) && !defined(ISUBUNTU2004)"
+          new = "&& LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0) && !defined(ISUBUNTU2004) && !defined(ISQSDK)"
+          if old not in s:
+              raise SystemExit("COMPAT_INIT_CRYPTO condition not found")
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          # QSDK 5.4 contains include/crypto/chacha.h, but it does not expose
+          # the newer chacha_init()/chacha20_crypt() API expected by AWG.
+          # Use the AWG compatibility header explicitly before compat.h can
+          # resolve the kernel header.
           p = Path("awg/src/compat/Kbuild.include")
           s = p.read_text()
           marker = "ifeq ($(wildcard $(srctree)/include/crypto/chacha20poly1305.h),)"
-          compat = "ifeq ($(shell [ $(VERSION) -lt 5 -o \\( $(VERSION) -eq 5 -a $(PATCHLEVEL) -lt 5 \\) ] && echo y),y)\nccflags-y += -I$(kbuild-dir)/compat/crypto/chacha/include\nendif\n\n"
-          if "compat/crypto/chacha/include" not in s:
+          compat = "ifeq ($(shell [ $(VERSION) -lt 5 -o \\( $(VERSION) -eq 5 -a $(PATCHLEVEL) -lt 5 \\) ] && echo y),y)\nccflags-y += -include $(kbuild-dir)/compat/crypto/chacha/include/crypto/chacha.h\nendif\n\n"
+          if "-include $(kbuild-dir)/compat/crypto/chacha/include/crypto/chacha.h" not in s:
               s = s.replace(marker, compat + marker, 1)
           p.write_text(s)
           PY
+
+          grep -n -B2 -A4 'COMPAT_INIT_CRYPTO' awg/src/compat/compat.h || true
           grep -n -B2 -A4 'compat/crypto/chacha/include' awg/src/compat/Kbuild.include
 
       - name: Build AmneziaWG kernel module
         run: |
           set -eux
           cd awg/src
-          make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- M="$PWD" CONFIG_AMNEZIAWG=m WIREGUARD_VERSION=3.1.20260906 modules
+          make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- M="$PWD" CONFIG_AMNEZIAWG=m WIREGUARD_VERSION=3.1.20260906 EXTRA_CFLAGS=-DISQSDK modules
           test -f amneziawg.ko
           modinfo ./amneziawg.ko || true
           strings ./amneziawg.ko | grep -E 'vermagic=|AmneziaWG|amneziawg' | head -20
