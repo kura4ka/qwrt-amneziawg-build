@@ -6,4 +6,4 @@ Target kernel: 5.4.213
 Target: ipq95xx/generic
 Architecture: aarch64_cortex-a53
 
-The build is intended to reproduce a loadable `amneziawg.ko` with matching kernel vermagic and QSDK 12.5 ABI.
+The build targets the QSDK 12.5 kernel tree and validates the external UDP-tunnel module dependencies during modpost, in addition to matching the router's exact kernel vermagic.
