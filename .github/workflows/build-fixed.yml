@@ -3,6 +3,7 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -18,77 +19,51 @@ jobs:
           test "$(sed -n 's/^SUBLEVEL = //p' Makefile)" = 213
           cp "$GITHUB_WORKSPACE/config/qwrt-5.4.213.config" .config
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= olddefconfig
-          # QWRT's running kernel explicitly has these values; QSDK olddefconfig otherwise changes them.
-          sed -i '/^CONFIG_LOCALVERSION_AUTO=/d;/^CONFIG_ARM64_MODULE_PLTS=/d;/^CONFIG_MODULES_TREE_LOOKUP=/d' .config
+          sed -i '/^CONFIG_LOCALVERSION_AUTO=/d' .config
           echo '# CONFIG_LOCALVERSION_AUTO is not set' >> .config
-          echo '# CONFIG_ARM64_MODULE_PLTS is not set' >> .config
-          echo 'CONFIG_MODULES_TREE_LOOKUP=y' >> .config
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= prepare modules_prepare
+          sh "$GITHUB_WORKSPACE/scripts/force-qwrt-module-abi.sh" "$PWD"
           test "$(cat include/config/kernel.release)" = 5.4.213
           test "$(make -s ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= kernelrelease)" = 5.4.213
-          echo '=== module ABI config ==='
-          grep -E '^CONFIG_(MODULES|MODULES_USE_ELF_RELA|MODULES_TREE_LOOKUP|MODULE_UNLOAD|MODVERSIONS|MODULE_STRIPPED|MODULE_SIG|KALLSYMS|GENERIC_BUG|ARM64_MODULE_PLTS|SYSFS|SMP|TRACEPOINTS|TREE_SRCU|BPF_EVENTS|JUMP_LABEL|TRACING|EVENT_TRACING|FTRACE_MCOUNT_RECORD|CONSTRUCTORS|FUNCTION_ERROR_INJECTION|LIVEPATCH)=' .config || true
           echo "KDIR=$PWD" >> "$GITHUB_ENV"
-      - name: Probe struct module ABI
+          grep -E 'CONFIG_(ARM64_MODULE_PLTS|MODULES_TREE_LOOKUP)' include/config/auto.conf include/generated/autoconf.h
+      - name: Probe module ABI
         run: |
           set -eux
-          rm -rf "$GITHUB_WORKSPACE/abi_probe"
-          mkdir -p "$GITHUB_WORKSPACE/abi_probe"
-          cat > "$GITHUB_WORKSPACE/abi_probe/abi_probe.c" <<'EOF'
-          #include <linux/module.h>
-          char qws_module_size_probe[sizeof(struct module)];
-          EOF
-          cat > "$GITHUB_WORKSPACE/abi_probe/Makefile" <<'EOF'
-          obj-m += abi_probe.o
-          EOF
+          mkdir -p abi_probe
+          printf '#include <linux/module.h>\nchar qws_module_size_probe[sizeof(struct module)];\n' > abi_probe/abi_probe.c
+          printf 'obj-m += abi_probe.o\n' > abi_probe/Makefile
           make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M="$GITHUB_WORKSPACE/abi_probe" modules
-          size="$(readelf -Ws "$GITHUB_WORKSPACE/abi_probe/abi_probe.o" | awk '$8 == "qws_module_size_probe" {print $3; exit}')"
-          echo "QSDK struct module size = ${size} bytes"
+          size="$(readelf -Ws abi_probe/abi_probe.o | awk '$8=="qws_module_size_probe"{print $3;exit}')"
+          echo "QSDK struct module size=$size"
           test "$size" = 768
-      - name: Kernel dependency symbol modules
+          readelf -S abi_probe/abi_probe.ko | grep -F '.gnu.linkonce.this_module'
+      - name: Kernel dependencies
         run: |
           set -eux
-          rm -rf "$GITHUB_WORKSPACE/depmods"
-          mkdir -p "$GITHUB_WORKSPACE/depmods"
-          ln -s "$KDIR/net/ipv4/udp_tunnel.c" "$GITHUB_WORKSPACE/depmods/udp_tunnel.c"
-          ln -s "$KDIR/net/ipv6/ip6_udp_tunnel.c" "$GITHUB_WORKSPACE/depmods/ip6_udp_tunnel.c"
-          cat > "$GITHUB_WORKSPACE/depmods/Makefile" <<'EOF'
-          obj-m += udp_tunnel.o
-          obj-m += ip6_udp_tunnel.o
-          EOF
-          make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M="$GITHUB_WORKSPACE/depmods" KCFLAGS="-Wno-error=dangling-pointer -Wno-dangling-pointer" modules
-          test -s "$GITHUB_WORKSPACE/depmods/Module.symvers"
-          cat "$GITHUB_WORKSPACE/depmods/Module.symvers"
-          grep -Eq '[[:space:]]udp_tunnel_xmit_skb([[:space:]]|$)' "$GITHUB_WORKSPACE/depmods/Module.symvers"
-          grep -Eq '[[:space:]]udp_tunnel6_xmit_skb([[:space:]]|$)' "$GITHUB_WORKSPACE/depmods/Module.symvers"
+          mkdir -p depmods
+          ln -s "$KDIR/net/ipv4/udp_tunnel.c" depmods/udp_tunnel.c
+          ln -s "$KDIR/net/ipv6/ip6_udp_tunnel.c" depmods/ip6_udp_tunnel.c
+          printf 'obj-m += udp_tunnel.o\nobj-m += ip6_udp_tunnel.o\n' > depmods/Makefile
+          make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M="$GITHUB_WORKSPACE/depmods" KCFLAGS='-Wno-error=dangling-pointer -Wno-dangling-pointer' modules
+          grep -Eq '[[:space:]]udp_tunnel_xmit_skb([[:space:]]|$)' depmods/Module.symvers
+          grep -Eq '[[:space:]]udp_tunnel6_xmit_skb([[:space:]]|$)' depmods/Module.symvers
       - name: AWG
         run: |
           set -eux
           git clone --depth 1 --branch v3.1.20260906 https://github.com/amnezia-vpn/amneziawg-linux-kernel-module.git awg
           mkdir -p awg/src/compat/crypto/chacha/include/crypto
           cp patches/chacha.h awg/src/compat/crypto/chacha/include/crypto/chacha.h
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path('awg/src/compat/compat.h'); s=p.read_text()
-          s=s.replace(' && !defined(ISUBUNTU2004)\n#define COMPAT_INIT_CRYPTO',' && !defined(ISUBUNTU2004) && !defined(ISQSDK)\n#define COMPAT_INIT_CRYPTO',1)
-          s=s.replace('#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0)\n#include <crypto/chacha.h>','#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0)\n#if defined(ISQSDK) && LINUX_VERSION_CODE < KERNEL_VERSION(5, 5, 0)\n#include "crypto/chacha/include/crypto/chacha.h"\n#else\n#include <crypto/chacha.h>\n#endif',1)
-          s=s.replace('(CHACHA_BLOCK_SIZE / sizeof(u32))','(CHACHA20_BLOCK_SIZE / sizeof(u32))',1)
-          s=s.replace('#include <crypto/blake2s.h>\n#define blake2s_ctx blake2s_state\n#define blake2s(key, keylen, in, inlen, out, outlen) \\\n\tblake2s(out, in, key, outlen, inlen, keylen)','#include <zinc/blake2s.h>\n#define blake2s_ctx blake2s_state',1)
-          p.write_text(s)
-          p=Path('awg/src/noise.c'); s=p.read_text(); s=s.replace('blake2s(NULL, 0, handshake_name, sizeof(handshake_name),\n\t\thandshake_init_chaining_key, NOISE_HASH_LEN);','blake2s(handshake_init_chaining_key, handshake_name, NULL,\n\t\tNOISE_HASH_LEN, sizeof(handshake_name), 0);',1); p.write_text(s)
-          p=Path('awg/src/cookie.c'); s=p.read_text(); s=s.replace('blake2s(key, NOISE_SYMMETRIC_KEY_LEN, message, len, mac1, COOKIE_LEN);','blake2s(mac1, message, key, COOKIE_LEN, len, NOISE_SYMMETRIC_KEY_LEN);',1); s=s.replace('blake2s(cookie, COOKIE_LEN, message, len, mac2, COOKIE_LEN);','blake2s(mac2, message, cookie, COOKIE_LEN, len, COOKIE_LEN);',1); s=s.replace('#include <crypto/blake2s.h>','#include <zinc/blake2s.h>',1); p.write_text(s)
-          p=Path('awg/src/messages.h'); s=p.read_text().replace('#include <crypto/blake2s.h>','#include <zinc/blake2s.h>',1); p.write_text(s)
-          p=Path('awg/src/compat/crypto/chacha/include/crypto/chacha.h'); s=p.read_text().replace('#ifndef _CRYPTO_CHACHA_H','#ifndef __AWG_COMPAT_CRYPTO_CHACHA_H',1).replace('#define _CRYPTO_CHACHA_H','#define __AWG_COMPAT_CRYPTO_CHACHA_H',1).replace('#endif /* _CRYPTO_CHACHA_H */','#endif /* __AWG_COMPAT_CRYPTO_CHACHA_H */',1); p.write_text(s)
-          PY
+          python3 scripts/patch-awg.py
           cd awg/src
-          make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M="$PWD" KBUILD_EXTRA_SYMBOLS="$GITHUB_WORKSPACE/depmods/Module.symvers" CONFIG_AMNEZIAWG=m WIREGUARD_VERSION=3.1.20260906 EXTRA_CFLAGS="-DISQSDK -Wno-stringop-overread" V=1 modules
+          make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M="$PWD" KBUILD_EXTRA_SYMBOLS="$GITHUB_WORKSPACE/depmods/Module.symvers" CONFIG_AMNEZIAWG=m WIREGUARD_VERSION=3.1.20260906 EXTRA_CFLAGS='-DISQSDK -Wno-stringop-overread' V=1 modules
           test -f amneziawg.ko
           test "$(modinfo -F vermagic ./amneziawg.ko)" = '5.4.213 SMP preempt mod_unload aarch64'
           deps="$(modinfo -F depends ./amneziawg.ko)"
           echo "AWG depends=$deps"
-          test -n "$deps"
-          printf '%s\n' "$deps" | tr ',' '\n' | grep -qx 'udp_tunnel'
-          printf '%s\n' "$deps" | tr ',' '\n' | grep -qx 'ip6_udp_tunnel'
+          printf '%s\n' "$deps" | tr ',' '\n' | grep -qx udp_tunnel
+          printf '%s\n' "$deps" | tr ',' '\n' | grep -qx ip6_udp_tunnel
+          readelf -S amneziawg.ko | grep -F '.gnu.linkonce.this_module'
           mkdir -p "$GITHUB_WORKSPACE/out"
           cp amneziawg.ko "$GITHUB_WORKSPACE/out/"
           cp Module.symvers "$GITHUB_WORKSPACE/out/"
