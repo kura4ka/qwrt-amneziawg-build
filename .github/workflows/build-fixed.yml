@@ -1,0 +1,79 @@
+name: Build AmneziaWG 5.4.213
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev dwarves gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu cpio rsync wget xz-utils git kmod
+      - name: Kernel
+        run: |
+          set -eux
+          git clone --depth 1 --single-branch --branch NHSS.QSDK.12.5.r5 https://github.com/CodeLinaro-mirror/qsdk_oss_kernel_linux-ipq-5.4.git work
+          cd work
+          test "$(sed -n 's/^SUBLEVEL = //p' Makefile)" = 213
+          cp "$GITHUB_WORKSPACE/config/qwrt-5.4.213.config" .config
+          sed -i '/^CONFIG_LOCALVERSION_AUTO=/d' .config
+          echo '# CONFIG_LOCALVERSION_AUTO is not set' >> .config
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= olddefconfig
+          grep -q '^# CONFIG_LOCALVERSION_AUTO is not set$' .config
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= prepare modules_prepare
+          test "$(cat include/config/kernel.release)" = 5.4.213
+          echo "KDIR=$PWD" >> "$GITHUB_ENV"
+      - name: Kernel dependency symbol modules
+        run: |
+          set -eux
+          rm -rf "$GITHUB_WORKSPACE/depmods"
+          mkdir -p "$GITHUB_WORKSPACE/depmods"
+          ln -s "$KDIR/net/ipv4/udp_tunnel.c" "$GITHUB_WORKSPACE/depmods/udp_tunnel.c"
+          ln -s "$KDIR/net/ipv6/ip6_udp_tunnel.c" "$GITHUB_WORKSPACE/depmods/ip6_udp_tunnel.c"
+          cat > "$GITHUB_WORKSPACE/depmods/Makefile" <<'EOF'
+          obj-m += udp_tunnel.o
+          obj-m += ip6_udp_tunnel.o
+          EOF
+          make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M="$GITHUB_WORKSPACE/depmods" KCFLAGS="-Wno-error=dangling-pointer -Wno-dangling-pointer" modules
+          test -s "$GITHUB_WORKSPACE/depmods/Module.symvers"
+          cat "$GITHUB_WORKSPACE/depmods/Module.symvers"
+          grep -Eq '[[:space:]]udp_tunnel_xmit_skb([[:space:]]|$)' "$GITHUB_WORKSPACE/depmods/Module.symvers"
+          grep -Eq '[[:space:]]udp_tunnel6_xmit_skb([[:space:]]|$)' "$GITHUB_WORKSPACE/depmods/Module.symvers"
+      - name: AWG
+        run: |
+          set -eux
+          git clone --depth 1 --branch v3.1.20260906 https://github.com/amnezia-vpn/amneziawg-linux-kernel-module.git awg
+          mkdir -p awg/src/compat/crypto/chacha/include/crypto
+          cp patches/chacha.h awg/src/compat/crypto/chacha/include/crypto/chacha.h
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('awg/src/compat/compat.h'); s=p.read_text()
+          s=s.replace(' && !defined(ISUBUNTU2004)\n#define COMPAT_INIT_CRYPTO',' && !defined(ISUBUNTU2004) && !defined(ISQSDK)\n#define COMPAT_INIT_CRYPTO',1)
+          s=s.replace('#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0)\n#include <crypto/chacha.h>','#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0)\n#if defined(ISQSDK) && LINUX_VERSION_CODE < KERNEL_VERSION(5, 5, 0)\n#include "crypto/chacha/include/crypto/chacha.h"\n#else\n#include <crypto/chacha.h>\n#endif',1)
+          s=s.replace('(CHACHA_BLOCK_SIZE / sizeof(u32))','(CHACHA20_BLOCK_SIZE / sizeof(u32))',1)
+          s=s.replace('#include <crypto/blake2s.h>\n#define blake2s_ctx blake2s_state\n#define blake2s(key, keylen, in, inlen, out, outlen) \\\n\tblake2s(out, in, key, outlen, inlen, keylen)','#include <zinc/blake2s.h>\n#define blake2s_ctx blake2s_state',1)
+          p.write_text(s)
+          p=Path('awg/src/noise.c'); s=p.read_text(); s=s.replace('blake2s(NULL, 0, handshake_name, sizeof(handshake_name),\n\t\thandshake_init_chaining_key, NOISE_HASH_LEN);','blake2s(handshake_init_chaining_key, handshake_name, NULL,\n\t\tNOISE_HASH_LEN, sizeof(handshake_name), 0);',1); p.write_text(s)
+          p=Path('awg/src/cookie.c'); s=p.read_text(); s=s.replace('blake2s(key, NOISE_SYMMETRIC_KEY_LEN, message, len, mac1, COOKIE_LEN);','blake2s(mac1, message, key, COOKIE_LEN, len, NOISE_SYMMETRIC_KEY_LEN);',1); s=s.replace('blake2s(cookie, COOKIE_LEN, message, len, mac2, COOKIE_LEN);','blake2s(mac2, message, cookie, COOKIE_LEN, len, COOKIE_LEN);',1); s=s.replace('#include <crypto/blake2s.h>','#include <zinc/blake2s.h>',1); p.write_text(s)
+          p=Path('awg/src/messages.h'); s=p.read_text().replace('#include <crypto/blake2s.h>','#include <zinc/blake2s.h>',1); p.write_text(s)
+          p=Path('awg/src/compat/crypto/chacha/include/crypto/chacha.h'); s=p.read_text().replace('#ifndef _CRYPTO_CHACHA_H','#ifndef __AWG_COMPAT_CRYPTO_CHACHA_H',1).replace('#define _CRYPTO_CHACHA_H','#define __AWG_COMPAT_CRYPTO_CHACHA_H',1).replace('#endif /* _CRYPTO_CHACHA_H */','#endif /* __AWG_COMPAT_CRYPTO_CHACHA_H */',1); p.write_text(s)
+          PY
+          cd awg/src
+          make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M="$PWD" KBUILD_EXTRA_SYMBOLS="$GITHUB_WORKSPACE/depmods/Module.symvers" CONFIG_AMNEZIAWG=m WIREGUARD_VERSION=3.1.20260906 EXTRA_CFLAGS="-DISQSDK -Wno-stringop-overread" V=1 modules
+          test -f amneziawg.ko
+          test "$(modinfo -F vermagic ./amneziawg.ko)" = '5.4.213 SMP preempt mod_unload aarch64'
+          deps="$(modinfo -F depends ./amneziawg.ko)"
+          echo "AWG depends=$deps"
+          test -n "$deps"
+          printf '%s\n' "$deps" | tr ',' '\n' | grep -qx 'udp_tunnel'
+          printf '%s\n' "$deps" | tr ',' '\n' | grep -qx 'ip6_udp_tunnel'
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp amneziawg.ko "$GITHUB_WORKSPACE/out/"
+          cp Module.symvers "$GITHUB_WORKSPACE/out/"
+          cp "$GITHUB_WORKSPACE/depmods/Module.symvers" "$GITHUB_WORKSPACE/out/kernel-depends.symvers"
+          printf '%s\n' "$deps" > "$GITHUB_WORKSPACE/out/amneziawg.depends"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: amneziawg-5.4.213
+          path: out/
