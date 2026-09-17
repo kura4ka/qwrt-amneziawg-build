@@ -169,13 +169,14 @@ replacement = '''int __init wg_genetlink_init(void)
 \treturn genl_register_family(&genl_family);
 }'''
 
-s, n = re.subn(
+s = re.sub(
     r'int __init wg_genetlink_init\(void\)\n\{\n\s*return genl_register_family\(&genl_family\);\n\}',
-    replacement,
+    lambda _m: replacement,
     s,
     count=1,
 )
-if n != 1:
+
+if 'AWGDBG: PROBE_BEGIN' not in s:
     raise SystemExit('generic netlink init anchor not found')
 
 p.write_text(s)
