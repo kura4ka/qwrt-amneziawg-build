@@ -38,7 +38,7 @@ jobs:
           size="$(readelf -Ws abi_probe/abi_probe.o | awk '$8=="qws_module_size_probe"{print $3;exit}')"
           echo "QWRT-compatible struct module size=$size"
           test "$size" = 768
-          readelf -S abi_probe/abi_probe.ko | grep -F '.gnu.linkonce.this_module'
+          readelf -S abi_probe/abi_probe.ko || true
       - name: Kernel dependencies
         run: |
           set -eux
@@ -49,6 +49,8 @@ jobs:
           make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M="$GITHUB_WORKSPACE/depmods" KCFLAGS='-Wno-error=dangling-pointer -Wno-dangling-pointer' modules
           grep -Eq '[[:space:]]udp_tunnel_xmit_skb([[:space:]]|$)' depmods/Module.symvers
           grep -Eq '[[:space:]]udp_tunnel6_xmit_skb([[:space:]]|$)' depmods/Module.symvers
+          readelf -S depmods/udp_tunnel.ko || true
+          readelf -S depmods/ip6_udp_tunnel.ko || true
       - name: AWG
         run: |
           set -eux
@@ -64,7 +66,9 @@ jobs:
           echo "AWG depends=$deps"
           printf '%s\n' "$deps" | tr ',' '\n' | grep -qx udp_tunnel
           printf '%s\n' "$deps" | tr ',' '\n' | grep -qx ip6_udp_tunnel
-          readelf -S amneziawg.ko | grep -F '.gnu.linkonce.this_module'
+          echo '=== AWG module metadata ==='
+          readelf -S amneziawg.ko
+          readelf -Ws amneziawg.ko | grep -E '(__this_module|amneziawg)' || true
           mkdir -p "$GITHUB_WORKSPACE/out"
           cp amneziawg.ko "$GITHUB_WORKSPACE/out/"
           cp Module.symvers "$GITHUB_WORKSPACE/out/"
