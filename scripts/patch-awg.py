@@ -12,9 +12,6 @@ s = s.replace('(CHACHA_BLOCK_SIZE / sizeof(u32))', '(CHACHA20_BLOCK_SIZE / sizeo
 s = s.replace(
     '#include <crypto/blake2s.h>\n#define blake2s_ctx blake2s_state\n#define blake2s(key, keylen, in, inlen, out, outlen) \\\n\tblake2s(out, in, key, outlen, inlen, keylen)',
     '#include <zinc/blake2s.h>\n#define blake2s_ctx blake2s_state', 1)
-s = s.replace(
-    '#define COMPAT_INIT_CRYPTO',
-    '#define COMPAT_CANNOT_USE_NETLINK_MCGRPS\n#define COMPAT_INIT_CRYPTO', 1)
 p.write_text(s)
 
 p = Path('awg/src/noise.c')
@@ -65,5 +62,7 @@ p = Path('awg/src/netlink.c')
 s = p.read_text()
 s = s.replace(
     'int __init wg_genetlink_init(void)\n{\n\treturn genl_register_family(&genl_family);\n}',
-    'int __init wg_genetlink_init(void)\n{\n\tpr_err("AWGDBG: genl sizeof_family=%zu sizeof_ops=%zu name=%s n_ops=%u n_mcgrps=%u\\n",\n\t       sizeof(genl_family), sizeof(genl_ops), genl_family.name,\n\t       genl_family.n_ops, genl_family.n_mcgrps);\n\tpr_err("AWGDBG: genl op0 cmd=%u doit=%px dumpit=%px; op1 cmd=%u doit=%px dumpit=%px\\n",\n\t       genl_ops[0].cmd, genl_ops[0].doit, genl_ops[0].dumpit,\n\t       genl_ops[1].cmd, genl_ops[1].doit, genl_ops[1].dumpit);\n\tpr_err("AWGDBG: genl mcgrp0 name=%s\\n", genl_family.n_mcgrps ? genl_family.mcgrps[0].name : "<none>");\n\treturn genl_register_family(&genl_family);\n}', 1)
+    'int __init wg_genetlink_init(void)\n{\n\tpr_err("AWGDBG: MCGRPS_OFF_BUILD\\n");\n\tpr_err("AWGDBG: genl sizeof_family=%zu sizeof_ops=%zu name=%s n_ops=%u n_mcgrps=%u\\n",\n\t       sizeof(genl_family), sizeof(genl_ops), genl_family.name,\n\t       genl_family.n_ops, genl_family.n_mcgrps);\n\tpr_err("AWGDBG: genl op0 cmd=%u doit=%px dumpit=%px; op1 cmd=%u doit=%px dumpit=%px\\n",\n\t       genl_ops[0].cmd, genl_ops[0].doit, genl_ops[0].dumpit,\n\t       genl_ops[1].cmd, genl_ops[1].doit, genl_ops[1].dumpit);\n\tpr_err("AWGDBG: genl mcgrp0 name=%s\\n", genl_family.n_mcgrps ? genl_family.mcgrps[0].name : "<none>");\n\treturn genl_register_family(&genl_family);\n}', 1)
+s = s.replace('.mcgrps = wg_genl_mcgrps,', '.mcgrps = NULL,', 1)
+s = s.replace('.n_mcgrps = ARRAY_SIZE(wg_genl_mcgrps)', '.n_mcgrps = 0', 1)
 p.write_text(s)
