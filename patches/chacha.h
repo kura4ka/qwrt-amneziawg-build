@@ -9,10 +9,7 @@
 #include <linux/string.h>
 #include <zinc/chacha20.h>
 
-#define CHACHA_IV_SIZE 16
-#define CHACHA_KEY_SIZE CHACHA20_KEY_SIZE
-#define CHACHA_BLOCK_SIZE CHACHA20_BLOCK_SIZE
-#define CHACHAPOLY_IV_SIZE 12
+/* QSDK 5.4 already provides these size constants in crypto/chacha.h. */
 
 static inline void chacha_init(u32 *state, const u32 *key, const u8 *iv)
 {
