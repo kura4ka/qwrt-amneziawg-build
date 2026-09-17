@@ -18,8 +18,11 @@ jobs:
           test "$(sed -n 's/^SUBLEVEL = //p' Makefile)" = 213
           cp "$GITHUB_WORKSPACE/config/qwrt-5.4.213.config" .config
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= olddefconfig
-          sed -i '/^CONFIG_LOCALVERSION_AUTO=/d' .config
+          # QWRT's running kernel explicitly has these values; QSDK olddefconfig otherwise changes them.
+          sed -i '/^CONFIG_LOCALVERSION_AUTO=/d;/^CONFIG_ARM64_MODULE_PLTS=/d;/^CONFIG_MODULES_TREE_LOOKUP=/d' .config
           echo '# CONFIG_LOCALVERSION_AUTO is not set' >> .config
+          echo '# CONFIG_ARM64_MODULE_PLTS is not set' >> .config
+          echo 'CONFIG_MODULES_TREE_LOOKUP=y' >> .config
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= prepare modules_prepare
           test "$(cat include/config/kernel.release)" = 5.4.213
           test "$(make -s ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= kernelrelease)" = 5.4.213
