@@ -77,9 +77,30 @@ static int awg_genl_probe_oneop(void)
 
 static void awg_genl_probe_register_ops(void)
 {
-	/* Disabled: QSDK 5.4 vendor headers do not expose the legacy helper
-	 * consistently. Do not break the module build while probing ABI. */
-	pr_err("AWGDBG: probe_register_ops_unavailable\\n");
+	/* Probe the QSDK workaround: register with one op, then expose the
+	 * second static op after successful family registration. */
+	static const struct genl_ops ops[] = {
+		{ .cmd = 1, .doit = awg_probe_doit },
+		{ .cmd = 2, .doit = awg_probe_doit },
+	};
+	static struct genl_family family = {
+		.name = "awgprobe11",
+		.version = 1,
+		.ops = ops,
+		.n_ops = 1,
+		.module = THIS_MODULE,
+	};
+	int ret;
+
+	ret = genl_register_family(&family);
+	pr_err("AWGDBG: probe_one_then_expand_register=%d n_ops=%u\\n",
+	       ret, family.n_ops);
+	if (!ret) {
+		family.n_ops = ARRAY_SIZE(ops);
+		pr_err("AWGDBG: probe_one_then_expand_after n_ops=%u cmd0=%u cmd1=%u\\n",
+		       family.n_ops, family.ops[0].cmd, family.ops[1].cmd);
+		genl_unregister_family(&family);
+	}
 }
 static void awg_genl_probe_extra(void)
 {
@@ -242,7 +263,18 @@ replacement = '''int __init wg_genetlink_init(void)
 \t       genl_ops[0].cmd, genl_ops[0].doit, genl_ops[0].dumpit,
 \t       genl_ops[1].cmd, genl_ops[1].doit, genl_ops[1].dumpit);
 \tpr_err("AWGDBG: genl mcgrp0 name=%s\\n", genl_family.n_mcgrps ? genl_family.mcgrps[0].name : "<none>");
-\treturn genl_register_family(&genl_family);
+\t{
+\t\tunsigned int saved_n_ops = genl_family.n_ops;
+\t\tint ret;
+\t\tgenl_family.n_ops = 1;
+\t\tret = genl_register_family(&genl_family);
+\t\tif (ret)
+\t\t\treturn ret;
+\t\tgenl_family.n_ops = saved_n_ops;
+\t\tpr_err("AWGDBG: QSDK_ONE_OP_REGISTER_OK expanded_n_ops=%u\\n",
+\t\t       genl_family.n_ops);
+\t\treturn 0;
+\t}
 }'''
 
 s = re.sub(
