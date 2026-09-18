@@ -219,6 +219,7 @@ replacement = '''int __init wg_genetlink_init(void)
 \tawg_genl_probe_empty();
 \tawg_genl_probe_oneop();
 \tawg_genl_probe_matrix();
+\tawg_genl_probe_extra();
 \tpr_err("AWGDBG: MCGRPS_OFF_BUILD\\n");
 \tpr_err("AWGDBG: genl sizeof_family=%zu sizeof_ops=%zu name=%s n_ops=%u n_mcgrps=%u\\n",
 \t       sizeof(genl_family), sizeof(genl_ops), genl_family.name,
