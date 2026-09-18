@@ -75,6 +75,33 @@ static int awg_genl_probe_oneop(void)
 \treturn ret;
 }
 
+static void awg_genl_probe_register_ops(void)
+{
+	static struct genl_ops ops[] = {
+		{ .cmd = 1, .doit = awg_probe_doit },
+		{ .cmd = 2, .doit = awg_probe_doit },
+	};
+	static struct genl_family family = {
+		.name = "awgprobe11",
+		.version = 1,
+		.module = THIS_MODULE,
+	};
+	int ret;
+
+	ret = genl_register_family(&family);
+	pr_err("AWGDBG: probe_family_then_ops_family=%d n_ops=%u\n", ret, family.n_ops);
+	if (ret)
+		return;
+
+	ret = genl_register_ops(&family, &ops[0]);
+	pr_err("AWGDBG: probe_register_ops_0=%d\n", ret);
+	if (!ret) {
+		ret = genl_register_ops(&family, &ops[1]);
+		pr_err("AWGDBG: probe_register_ops_1=%d\n", ret);
+	}
+	genl_unregister_family(&family);
+}
+
 static void awg_genl_probe_extra(void)
 {
 	static const struct genl_ops pair12_ops[] = {
@@ -224,7 +251,7 @@ replacement = '''int __init wg_genetlink_init(void)
 \tawg_genl_probe_empty();
 \tawg_genl_probe_oneop();
 \tawg_genl_probe_matrix();
-\tawg_genl_probe_extra();
+\tawg_genl_probe_extra();\n\tawg_genl_probe_register_ops();
 \tpr_err("AWGDBG: MCGRPS_OFF_BUILD\\n");
 \tpr_err("AWGDBG: genl sizeof_family=%zu sizeof_ops=%zu name=%s n_ops=%u n_mcgrps=%u\\n",
 \t       sizeof(genl_family), sizeof(genl_ops), genl_family.name,
