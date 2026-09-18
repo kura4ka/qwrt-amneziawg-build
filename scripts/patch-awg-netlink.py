@@ -77,22 +77,9 @@ static int awg_genl_probe_oneop(void)
 
 static void awg_genl_probe_register_ops(void)
 {
-	static struct genl_ops ops[] = {
-		{ .cmd = 1, .doit = awg_probe_doit },
-		{ .cmd = 2, .doit = awg_probe_doit },
-	};
-	static struct genl_family family = {
-		.name = "awgprobe11",
-		.version = 1,
-		.module = THIS_MODULE,
-	};
-	int ret;
-
-	ret = genl_register_family_with_ops(&family, ops, ARRAY_SIZE(ops));
-	pr_err("AWGDBG: probe_family_with_ops=%d n_ops=%u ops=%px\\n",
-	       ret, family.n_ops, family.ops);
-	if (!ret)
-		genl_unregister_family(&family);
+	/* Disabled: QSDK 5.4 vendor headers do not expose the legacy helper
+	 * consistently. Do not break the module build while probing ABI. */
+	pr_err("AWGDBG: probe_register_ops_unavailable\\n");
 }
 static void awg_genl_probe_extra(void)
 {
