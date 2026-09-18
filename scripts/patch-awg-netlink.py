@@ -70,6 +70,70 @@ static int awg_genl_probe_oneop(void)
 \treturn ret;
 }
 
+static void awg_genl_probe_extra(void)
+{
+	static const struct genl_ops pair12_ops[] = {
+		{ .cmd = 1, .doit = awg_probe_doit },
+		{ .cmd = 2, .doit = awg_probe_doit },
+	};
+	static struct genl_family pair12_family = {
+		.name = "awgprobe7",
+		.version = 1,
+		.ops = pair12_ops,
+		.n_ops = ARRAY_SIZE(pair12_ops),
+		.module = THIS_MODULE,
+	};
+	static const struct genl_ops pair13_ops[] = {
+		{ .cmd = 1, .doit = awg_probe_doit },
+		{ .cmd = 3, .doit = awg_probe_doit },
+	};
+	static struct genl_family pair13_family = {
+		.name = "awgprobe8",
+		.version = 1,
+		.ops = pair13_ops,
+		.n_ops = ARRAY_SIZE(pair13_ops),
+		.module = THIS_MODULE,
+	};
+	static const struct genl_ops duplicate_ops[] = {
+		{ .cmd = 1, .doit = awg_probe_doit },
+		{ .cmd = 1, .doit = awg_probe_doit },
+	};
+	static struct genl_family duplicate_family = {
+		.name = "awgprobe9",
+		.version = 1,
+		.ops = duplicate_ops,
+		.n_ops = ARRAY_SIZE(duplicate_ops),
+		.module = THIS_MODULE,
+	};
+	static struct genl_family second_only_family = {
+		.name = "awgprobe10",
+		.version = 1,
+		.ops = pair12_ops + 1,
+		.n_ops = 1,
+		.module = THIS_MODULE,
+	};
+
+	pr_err("AWGDBG: sizeof family=%zu ops=%zu; offsets family.ops=%zu n_ops=%zu maxattr=%zu module=%zu netnsok=%zu; ops.cmd=%zu doit=%zu dumpit=%zu flags=%zu\n",
+	       sizeof(struct genl_family), sizeof(struct genl_ops),
+	       offsetof(struct genl_family, ops), offsetof(struct genl_family, n_ops),
+	       offsetof(struct genl_family, maxattr), offsetof(struct genl_family, module),
+	       offsetof(struct genl_family, netnsok), offsetof(struct genl_ops, cmd),
+	       offsetof(struct genl_ops, doit), offsetof(struct genl_ops, dumpit),
+	       offsetof(struct genl_ops, flags));
+	pr_err("AWGDBG: pair12 ptr=%px size=%zu op0(cmd=%u doit=%px) op1(cmd=%u doit=%px)\n",
+	       pair12_ops, sizeof(pair12_ops), pair12_ops[0].cmd, pair12_ops[0].doit,
+	       pair12_ops[1].cmd, pair12_ops[1].doit);
+
+	awg_probe_result("probe_pair12", &pair12_family,
+			genl_register_family(&pair12_family));
+	awg_probe_result("probe_pair13", &pair13_family,
+			genl_register_family(&pair13_family));
+	awg_probe_result("probe_duplicate", &duplicate_family,
+			genl_register_family(&duplicate_family));
+	awg_probe_result("probe_second_only", &second_only_family,
+			genl_register_family(&second_only_family));
+}
+
 static void awg_genl_probe_matrix(void)
 {
 \tstatic const struct genl_ops cmd0_ops[] = {
