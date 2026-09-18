@@ -77,11 +77,23 @@ static int awg_genl_probe_oneop(void)
 
 static void awg_genl_probe_register_ops(void)
 {
-	/* QSDK may not export genl_register_ops(); keep this probe disabled
-	 * until the vendor ABI is confirmed. */
-	pr_err("AWGDBG: probe_register_ops_unavailable\n");
-}
+	static struct genl_ops ops[] = {
+		{ .cmd = 1, .doit = awg_probe_doit },
+		{ .cmd = 2, .doit = awg_probe_doit },
+	};
+	static struct genl_family family = {
+		.name = "awgprobe11",
+		.version = 1,
+		.module = THIS_MODULE,
+	};
+	int ret;
 
+	ret = genl_register_family_with_ops(&family, ops, ARRAY_SIZE(ops));
+	pr_err("AWGDBG: probe_family_with_ops=%d n_ops=%u ops=%px\\n",
+	       ret, family.n_ops, family.ops);
+	if (!ret)
+		genl_unregister_family(&family);
+}
 static void awg_genl_probe_extra(void)
 {
 	static const struct genl_ops pair12_ops[] = {
