@@ -77,29 +77,9 @@ static int awg_genl_probe_oneop(void)
 
 static void awg_genl_probe_register_ops(void)
 {
-	static struct genl_ops ops[] = {
-		{ .cmd = 1, .doit = awg_probe_doit },
-		{ .cmd = 2, .doit = awg_probe_doit },
-	};
-	static struct genl_family family = {
-		.name = "awgprobe11",
-		.version = 1,
-		.module = THIS_MODULE,
-	};
-	int ret;
-
-	ret = genl_register_family(&family);
-	pr_err("AWGDBG: probe_family_then_ops_family=%d n_ops=%u\n", ret, family.n_ops);
-	if (ret)
-		return;
-
-	ret = genl_register_ops(&family, &ops[0]);
-	pr_err("AWGDBG: probe_register_ops_0=%d\n", ret);
-	if (!ret) {
-		ret = genl_register_ops(&family, &ops[1]);
-		pr_err("AWGDBG: probe_register_ops_1=%d\n", ret);
-	}
-	genl_unregister_family(&family);
+	/* QSDK may not export genl_register_ops(); keep this probe disabled
+	 * until the vendor ABI is confirmed. */
+	pr_err("AWGDBG: probe_register_ops_unavailable\n");
 }
 
 static void awg_genl_probe_extra(void)
