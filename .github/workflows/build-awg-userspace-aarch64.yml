@@ -1,0 +1,52 @@
+name: Build AWG userspace (aarch64)
+
+on:
+  push:
+    branches:
+      - build-awg-userspace-aarch64
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout AmneziaWG tools
+        uses: actions/checkout@v4
+        with:
+          repository: amnezia-vpn/amneziawg-tools
+          ref: v3.1.20260812
+          path: amneziawg-tools
+
+      - name: Install cross compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - name: Build
+        working-directory: amneziawg-tools/src
+        run: |
+          make clean
+          make CC=aarch64-linux-gnu-gcc AR=aarch64-linux-gnu-ar RANLIB=aarch64-linux-gnu-ranlib
+          mkdir -p build
+          cp wg build/awg
+          cp wg-quick/linux.bash build/awg-quick
+          chmod 0755 build/awg build/awg-quick
+
+      - name: Validate
+        working-directory: amneziawg-tools/src
+        run: |
+          file build/awg
+          aarch64-linux-gnu-readelf -h build/awg | grep -E 'Class:|Machine:'
+          strings build/awg | grep -E 'Jc|Jmin|Jmax|S1|S2|H1|H2|H3|H4' | head -20
+          strings build/awg | grep -F 'amneziawg-tools' | head -5 || true
+
+      - name: Package
+        working-directory: amneziawg-tools/src
+        run: |
+          tar -czf awg-userspace-aarch64-v3.1.20260812.tar.gz -C build awg awg-quick
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: awg-userspace-aarch64-v3.1.20260812
+          path: amneziawg-tools/src/awg-userspace-aarch64-v3.1.20260812.tar.gz
