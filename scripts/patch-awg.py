@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 p = Path('awg/src/compat/compat.h')
