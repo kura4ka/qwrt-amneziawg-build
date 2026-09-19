@@ -200,26 +200,12 @@ probe = probe.replace('\\t', '\t')
 if 'awg_genl_probe_matrix' not in s:
     s = s.replace(needle, needle + probe, 1)
 
-old = r'''int __init wg_genetlink_init(void)
-{
-	pr_err("AWGDBG: PROBE_BEGIN\\n");
-	awg_genl_probe_empty();
-	awg_genl_probe_oneop();
-	pr_err("AWGDBG: MCGRPS_OFF_BUILD\\n");
-	pr_err("AWGDBG: genl sizeof_family=%zu sizeof_ops=%zu name=%s n_ops=%u n_mcgrps=%u\\n",
-	       sizeof(genl_family), sizeof(genl_ops), genl_family.name,
-	       genl_family.n_ops, genl_family.n_mcgrps);
-	pr_err("AWGDBG: family.ops=%px genl_ops=%px maxattr=%u policy=%px module=%px netnsok=%u parallel_ops=%u\\n",
-	       genl_family.ops, genl_ops, genl_family.maxattr, genl_family.policy,
-	       genl_family.module, genl_family.netnsok, genl_family.parallel_ops);
-	pr_err("AWGDBG: genl op0 cmd=%u doit=%px dumpit=%px; op1 cmd=%u doit=%px dumpit=%px\\n",
-	       genl_ops[0].cmd, genl_ops[0].doit, genl_ops[0].dumpit,
-	       genl_ops[1].cmd, genl_ops[1].doit, genl_ops[1].dumpit);
-	pr_err("AWGDBG: genl mcgrp0 name=%s\\n", genl_family.n_mcgrps ? genl_family.mcgrps[0].name : "<none>");
-	return genl_register_family(&genl_family);
-}'''
-# The exact text in the generated file uses normal escaped C strings.
-old = old.replace('\\t','\t')
+# Replace the version-specific init function without requiring an exact
+# generated/debugged body. AWG v3.1.20260906 changed this block several times.
+pattern = r'int __init wg_genetlink_init\\(void\\)\\n\\{.*?\\n\\}'
+m = re.search(pattern, s, flags=re.S)
+if not m:
+    raise SystemExit('generic netlink init function not found')
 new = r'''int __init wg_genetlink_init(void)
 {
 	pr_err("AWGDBG: PROBE_BEGIN\\n");
@@ -236,9 +222,22 @@ new = r'''int __init wg_genetlink_init(void)
 	pr_err("AWGDBG: genl op0 cmd=%u doit=%px dumpit=%px; op1 cmd=%u doit=%px dumpit=%px\\n",
 	       genl_ops[0].cmd, genl_ops[0].doit, genl_ops[0].dumpit,
 	       genl_ops[1].cmd, genl_ops[1].doit, genl_ops[1].dumpit);
-	pr_err("AWGDBG: genl mcgrp0 name=%s\\n", genl_family.n_mcgrps ? genl_family.mcgrps[0].name : "<none>");
-	return genl_register_family(&genl_family);
-}'''.replace('\\t','\t')
+	pr_err("AWGDBG: genl mcgrp0 name=%s\\n",
+	       genl_family.n_mcgrps ? genl_family.mcgrps[0].name : "<none>");
+	{
+		unsigned int saved_n_ops = genl_family.n_ops;
+		int ret;
+		genl_family.n_ops = 1;
+		ret = genl_register_family(&genl_family);
+		if (ret)
+			return ret;
+		genl_family.n_ops = saved_n_ops;
+		pr_err("AWGDBG: QSDK_ONE_OP_REGISTER_OK expanded_n_ops=%u\\n",
+		       genl_family.n_ops);
+		return 0;
+	}
+}'''
+s = s[:m.start()] + new.replace('\\t','\\t') + s[m.end():]
 if old not in s:
     raise SystemExit('expected netlink init block not found')
 s = s.replace(old, new, 1)
