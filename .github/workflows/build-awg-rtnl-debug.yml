@@ -39,7 +39,7 @@ jobs:
           git clone --depth 1 --branch v3.1.20260906 https://github.com/amnezia-vpn/amneziawg-linux-kernel-module.git awg
           mkdir -p awg/src/compat/crypto/chacha/include/crypto
           cp patches/chacha.h awg/src/compat/crypto/chacha/include/crypto/chacha.h
-          python3 scripts/patch-awg.py || python3 scripts/patch-awg-netlink.py
+          python3 scripts/patch-awg-netlink.py
           sh scripts/patch-rtnl-debug.sh
           cd awg/src
           make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M="$PWD" KBUILD_EXTRA_SYMBOLS="$GITHUB_WORKSPACE/depmods/Module.symvers" CONFIG_AMNEZIAWG=m WIREGUARD_VERSION=3.1.20260906 EXTRA_CFLAGS='-DISQSDK -Wno-stringop-overread -Wno-error=unused-function' V=1 modules
