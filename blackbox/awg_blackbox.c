@@ -4,7 +4,6 @@
 #include <linux/spinlock.h>
 #include <linux/timekeeping.h>
 #include <linux/sched.h>
-#include <linux/notifier.h>
 #include <linux/netdevice.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
@@ -118,40 +117,6 @@ static struct notifier_block netdev_nb = {
     .notifier_call = awg_bb_netdev,
 };
 
-static int awg_bb_die(struct notifier_block *nb, unsigned long val, void *data)
-{
-    struct die_args *args = data;
-
-    if (args)
-        pr_emerg("AWGBB: DIE val=%lu err=%d trap=%d pc=%px\n", val,
-                 args->err, args->trapnr,
-                 args->regs ? (void *)instruction_pointer(args->regs) : NULL);
-    else
-        pr_emerg("AWGBB: DIE val=%lu\n", val);
-
-    awg_bb_event("DIE val=%lu", val);
-    return NOTIFY_DONE;
-}
-
-static struct notifier_block die_nb = {
-    .notifier_call = awg_bb_die,
-    .priority = 200,
-};
-
-static int awg_bb_panic(struct notifier_block *nb, unsigned long val, void *data)
-{
-    pr_emerg("AWGBB: PANIC notifier val=%lu msg=%s\n", val,
-             data ? (char *)data : "<none>");
-    awg_bb_event("PANIC val=%lu msg=%s", val,
-                 data ? (char *)data : "<none>");
-    return NOTIFY_DONE;
-}
-
-static struct notifier_block panic_nb = {
-    .notifier_call = awg_bb_panic,
-    .priority = 200,
-};
-
 static void awg_bb_kmsg_dump(struct kmsg_dumper *dumper,
                              enum kmsg_dump_reason reason)
 {
@@ -189,14 +154,6 @@ static int __init awg_bb_init(void)
     if (ret)
         goto err_proc;
 
-    ret = register_die_notifier(&die_nb);
-    if (ret)
-        goto err_netdev;
-
-    ret = register_panic_notifier(&panic_nb);
-    if (ret)
-        goto err_die;
-
     ret = kmsg_dump_register(&kmsg_dumper);
     if (ret)
         goto err_panic;
@@ -205,10 +162,6 @@ static int __init awg_bb_init(void)
     pr_info("AWGBB: loaded; /proc/awg_blackbox\n");
     return 0;
 
-err_panic:
-    unregister_panic_notifier(&panic_nb);
-err_die:
-    unregister_die_notifier(&die_nb);
 err_netdev:
     unregister_netdevice_notifier(&netdev_nb);
 err_proc:
@@ -221,8 +174,6 @@ err_proc:
 static void __exit awg_bb_exit(void)
 {
     kmsg_dump_unregister(&kmsg_dumper);
-    unregister_panic_notifier(&panic_nb);
-    unregister_die_notifier(&die_nb);
     unregister_netdevice_notifier(&netdev_nb);
     proc_remove(proc_ent);
     vfree(ring);
