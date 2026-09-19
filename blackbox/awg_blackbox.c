@@ -156,7 +156,7 @@ static int __init awg_bb_init(void)
 
     ret = kmsg_dump_register(&kmsg_dumper);
     if (ret)
-        goto err_panic;
+        goto err_netdev;
 
     awg_bb_event("BLACKBOX_INIT entries=%u", AWG_BB_ENTRIES);
     pr_info("AWGBB: loaded; /proc/awg_blackbox\n");
