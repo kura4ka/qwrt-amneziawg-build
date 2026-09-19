@@ -1,7 +1,7 @@
-name: Build AWG QWRT rtnl debug
+name: Build AWG QWRT blackbox diagnostics
 on:
   push:
-    branches: [build-awg-rtnl-debug]
+    branches: [build-awg-blackbox]
   workflow_dispatch:
 jobs:
   build:
@@ -33,7 +33,14 @@ jobs:
           ln -s "$KDIR/net/ipv6/ip6_udp_tunnel.c" depmods/ip6_udp_tunnel.c
           printf 'obj-m += udp_tunnel.o\nobj-m += ip6_udp_tunnel.o\n' > depmods/Makefile
           make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M="$GITHUB_WORKSPACE/depmods" KCFLAGS='-Wno-error=dangling-pointer -Wno-dangling-pointer' modules
-      - name: AWG debug module
+      - name: Build blackbox logger
+        run: |
+          set -eux
+          make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M="$GITHUB_WORKSPACE/blackbox" modules
+          test "$(modinfo -F vermagic "$GITHUB_WORKSPACE/blackbox/awg_blackbox.ko")" = '5.4.213 SMP preempt mod_unload aarch64'
+          test -s "$GITHUB_WORKSPACE/blackbox/Module.symvers"
+
+      - name: AWG instrumented debug module
         run: |
           set -eux
           git clone --depth 1 --branch v3.1.20260906 https://github.com/amnezia-vpn/amneziawg-linux-kernel-module.git awg
@@ -41,13 +48,17 @@ jobs:
           cp patches/chacha.h awg/src/compat/crypto/chacha/include/crypto/chacha.h
           python3 scripts/patch-awg.py || python3 scripts/patch-awg-netlink.py
           sh scripts/patch-rtnl-debug.sh
+          sh scripts/patch-awg-blackbox.sh
+          cp blackbox/awg_blackbox.h awg/src/awg_blackbox.h
           cd awg/src
-          make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M="$PWD" KBUILD_EXTRA_SYMBOLS="$GITHUB_WORKSPACE/depmods/Module.symvers" CONFIG_AMNEZIAWG=m WIREGUARD_VERSION=3.1.20260906 EXTRA_CFLAGS='-DISQSDK -Wno-stringop-overread -Wno-error=unused-function' V=1 modules
+          make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M="$PWD" KBUILD_EXTRA_SYMBOLS="$GITHUB_WORKSPACE/depmods/Module.symvers $GITHUB_WORKSPACE/blackbox/Module.symvers" CONFIG_AMNEZIAWG=m WIREGUARD_VERSION=3.1.20260906 EXTRA_CFLAGS='-DISQSDK -Wno-stringop-overread -Wno-error=unused-function' V=1 modules
           test "$(modinfo -F vermagic ./amneziawg.ko)" = '5.4.213 SMP preempt mod_unload aarch64'
           mkdir -p "$GITHUB_WORKSPACE/out"
-          cp amneziawg.ko "$GITHUB_WORKSPACE/out/amneziawg-rtnl-debug.ko"
-          cp Module.symvers "$GITHUB_WORKSPACE/out/"
+          cp amneziawg.ko "$GITHUB_WORKSPACE/out/amneziawg-blackbox.ko"
+          cp Module.symvers "$GITHUB_WORKSPACE/out/amneziawg-Module.symvers"
+          cp "$GITHUB_WORKSPACE/blackbox/awg_blackbox.ko" "$GITHUB_WORKSPACE/out/awg_blackbox.ko"
+          cp "$GITHUB_WORKSPACE/blackbox/Module.symvers" "$GITHUB_WORKSPACE/out/blackbox-Module.symvers"
       - uses: actions/upload-artifact@v4
         with:
-          name: amneziawg-5.4.213-rtnl-debug
+          name: amneziawg-5.4.213-blackbox
           path: out/
