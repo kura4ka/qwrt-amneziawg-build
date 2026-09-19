@@ -1,0 +1,53 @@
+name: Build AWG QWRT rtnl debug
+on:
+  push:
+    branches: [build-awg-rtnl-debug]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev dwarves gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu cpio rsync wget xz-utils git kmod
+      - name: Kernel
+        run: |
+          set -eux
+          git clone --depth 1 --single-branch --branch NHSS.QSDK.12.5.r5 https://github.com/CodeLinaro-mirror/qsdk_oss_kernel_linux-ipq-5.4.git work
+          cd work
+          test "$(sed -n 's/^SUBLEVEL = //p' Makefile)" = 213
+          cp "$GITHUB_WORKSPACE/config/qwrt-5.4.213.config" .config
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= olddefconfig
+          sed -i '/^CONFIG_LOCALVERSION_AUTO=/d' .config
+          echo '# CONFIG_LOCALVERSION_AUTO is not set' >> .config
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= prepare modules_prepare
+          sh "$GITHUB_WORKSPACE/scripts/patch-qwrt-arm64-module-header.sh" "$PWD"
+          sh "$GITHUB_WORKSPACE/scripts/force-qwrt-module-abi.sh" "$PWD"
+          test "$(cat include/config/kernel.release)" = 5.4.213
+          echo "KDIR=$PWD" >> "$GITHUB_ENV"
+      - name: Kernel dependencies
+        run: |
+          set -eux
+          mkdir -p depmods
+          ln -s "$KDIR/net/ipv4/udp_tunnel.c" depmods/udp_tunnel.c
+          ln -s "$KDIR/net/ipv6/ip6_udp_tunnel.c" depmods/ip6_udp_tunnel.c
+          printf 'obj-m += udp_tunnel.o\nobj-m += ip6_udp_tunnel.o\n' > depmods/Makefile
+          make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M="$GITHUB_WORKSPACE/depmods" KCFLAGS='-Wno-error=dangling-pointer -Wno-dangling-pointer' modules
+      - name: AWG debug module
+        run: |
+          set -eux
+          git clone --depth 1 --branch v3.1.20260906 https://github.com/amnezia-vpn/amneziawg-linux-kernel-module.git awg
+          mkdir -p awg/src/compat/crypto/chacha/include/crypto
+          cp patches/chacha.h awg/src/compat/crypto/chacha/include/crypto/chacha.h
+          python3 scripts/patch-awg.py || python3 scripts/patch-awg-netlink.py
+          sh scripts/patch-rtnl-debug.sh
+          cd awg/src
+          make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M="$PWD" KBUILD_EXTRA_SYMBOLS="$GITHUB_WORKSPACE/depmods/Module.symvers" CONFIG_AMNEZIAWG=m WIREGUARD_VERSION=3.1.20260906 EXTRA_CFLAGS='-DISQSDK -Wno-stringop-overread' V=1 modules
+          test "$(modinfo -F vermagic ./amneziawg.ko)" = '5.4.213 SMP preempt mod_unload aarch64'
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp amneziawg.ko "$GITHUB_WORKSPACE/out/amneziawg-debug.ko"
+          cp Module.symvers "$GITHUB_WORKSPACE/out/"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: amneziawg-5.4.213-rtnl-debug
+          path: out/
