@@ -2,13 +2,11 @@
 set -eu
 python3 - <<'PY'
 from pathlib import Path
-p = Path("awg/src/device.c")
-s = p.read_text()
-inc = '#include "awg_blackbox.h"\n'
-if inc not in s:
-    s = inc + s
-
-repls = [
+p=Path("awg/src/device.c")
+s=p.read_text()
+inc='#include "awg_blackbox.h"\n'
+if inc not in s: s=inc+s
+repls=[
 ("struct wg_device *wg = netdev_priv(dev);\n\tint ret = -ENOMEM, i;",
  "struct wg_device *wg = netdev_priv(dev);\n\tint ret = -ENOMEM, i;\n\tawg_bb_event(\"NEWLINK_ENTER dev=%px name=%s\", dev, dev ? dev->name : \"<null>\");"),
 ("\trcu_assign_pointer(wg->creating_net, link_net);",
@@ -41,18 +39,17 @@ repls = [
  "\tawg_bb_event(\"QUEUE_HANDSHAKE_BEGIN\");\n\tret = wg_packet_queue_init(&wg->handshake_queue, wg_packet_handshake_receive_worker,"),
 ("\tret = wg_ratelimiter_init();",
  "\tawg_bb_event(\"RATELIMITER_BEGIN\");\n\tret = wg_ratelimiter_init();"),
-("\tnetif_threaded_enable(dev);\n\tret = register_netdevice(dev);",
- "\tawg_bb_event(\"NETIF_THREADED_ENABLE_BEGIN\");\n\tnetif_threaded_enable(dev);\n\tawg_bb_event(\"NETIF_THREADED_ENABLE_DONE\");\n\tawg_bb_event(\"REGISTER_NETDEVICE_BEGIN\");\n\tret = register_netdevice(dev);"),
+("\tnetif_threaded_enable(dev);",
+ "\tawg_bb_event(\"NETIF_THREADED_ENABLE_BEGIN\");\n\tnetif_threaded_enable(dev);\n\tawg_bb_event(\"NETIF_THREADED_ENABLE_DONE\");"),
 ("\tret = register_netdevice(dev);",
- "\tret = register_netdevice(dev);\n\tawg_bb_event(\"REGISTER_NETDEVICE_RETURN ret=%d\", ret);"),
+ "\tawg_bb_event(\"REGISTER_NETDEVICE_BEGIN\");\n\tret = register_netdevice(dev);\n\tawg_bb_event(\"REGISTER_NETDEVICE_RETURN ret=%d\", ret);"),
 ("\tdev->priv_destructor = wg_destruct;",
  "\tawg_bb_event(\"DEVICE_LIST_ADD_DONE\");\n\tdev->priv_destructor = wg_destruct;"),
 ("\tpr_debug(\"%s: Interface created\\n\", dev->name);",
  "\tawg_bb_event(\"NEWLINK_DONE name=%s\", dev->name);\n\tpr_debug(\"%s: Interface created\\n\", dev->name);")
 ]
 for old,new in repls:
-    if old not in s:
-        raise SystemExit("missing anchor: "+old[:100])
+    if old not in s: raise SystemExit("missing anchor: "+old[:100])
     s=s.replace(old,new,1)
 p.write_text(s)
 PY
